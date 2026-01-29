@@ -8,6 +8,12 @@ them into a **trustworthy metric** behind a Streamlit app and a Cloud Run URL.
 You do **not** need to be a software engineer to use this. Most of the work is
 changing parameters, running notebooks, and reading charts.
 
+The bigger theme: modern analytics is **not only Power BI / dashboards**.
+With a bit of Python and SQL, you can build your own small but robust
+analytics products: local apps, hosted apps, and even CI/CD pipelines with
+role-based access and AI assistance – all using the same core ideas you
+already know from analytics work.
+
 ---
 
 ## Status badges
@@ -275,19 +281,28 @@ from Cloud Shell, but the recommended path is the GitHub Actions pipeline.
 
 ---
 
-## CI: how to show it in class
+## Beyond this workshop
 
-To demo “tests as a safety net” to students:
+After you finish the exercises, it is worth stepping back and noticing what
+you have actually done:
 
-- Make a tiny, harmless change (for example, edit a sentence in this README).
-- Push to a branch and open a pull request, or push directly to `main` if
-  working alone.
-- Open the **Actions** tab and show:
-  - the `CI` workflow running tests
-  - the `Docker build` workflow building the image.
+- You started from raw event data and used SQL to define a clear, repeatable
+  metric contract.
+- You added simple but powerful quality checks so that silent data problems
+  do not turn into silent business problems.
+- You wrapped that logic in a real app (Streamlit) that non-technical
+  stakeholders can use.
+- You saw that the same app can run locally on your laptop or behind a
+  Cloud Run URL.
 
-This reinforces that:
+In production teams, people layer on more engineering practices (CI/CD,
+RBAC, multiple databases, etc.), but the **core ideas do not change**:
 
-- metric logic is tested,
-- deployments are automated,
-- and no one is manually copying files to servers.
+- metrics are defined in code,
+- contracts and checks protect “truth”,
+- and products are just user-friendly ways to surface that logic.
+
+The point is not to turn every analyst into a platform engineer. The point is
+to show that you can participate in building robust analytics systems, not
+just consume dashboards, and that the tools you already know (SQL, basic
+Python) scale surprisingly far.
