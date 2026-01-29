@@ -5,8 +5,10 @@ This repo contains a **teaching demo** for data analytics students.
 You start with raw events (website sessions and purchases) and gradually turn
 them into a **trustworthy metric** behind a Streamlit app and a Cloud Run URL.
 
-You do **not** need to be a software engineer to use this. Most of the work is
-changing parameters, running notebooks, and reading charts.
+You don’t need to *start* as a software engineer to work through this, but the goal
+is to gently pull you in that direction. Most of the work is changing parameters,
+running notebooks, and reading charts – plus a bit of real coding that shows you the
+"back of the dashboard" and builds the habits of a full‑stack analytics engineer.
 
 The bigger theme: modern analytics is **not only Power BI / dashboards**.
 With a bit of Python and SQL, you can build your own small but robust
