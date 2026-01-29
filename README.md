@@ -1,6 +1,6 @@
 ## NorthPeak Retail / MarketTech demo
 
-This repo contains a **teaching demo** for data analytics students.It was developed with assistance from ChatGPT, GitHub Copilot, GitHub Workspaces, GitHub Actions, Google Cloud Run, and Google Cloud Build. 
+This repo contains a **teaching demo** for data analytics students. It was developed with assistance from ChatGPT, GitHub Copilot, GitHub Workspaces, GitHub Actions, Google Cloud Run, and Google Cloud Build. 
 
 You start with raw events (website sessions and purchases) and gradually turn
 them into a **trustworthy metric** behind a Streamlit app and a Cloud Run URL.
@@ -306,6 +306,26 @@ gcloud artifacts repositories create markettech \
 If you prefer a one-off manual deploy instead of CI/CD, you can still use
 `deploy_cloud_run.sh`, `cleanup_cloud_run.sh`, and `set_openai_key_cloud_run.sh`
 from Cloud Shell, but the recommended path is the GitHub Actions pipeline.
+
+### Teardown / cleanup (for instructors)
+
+When you are done with the workshop environment, you can clean up GCP
+resources from Cloud Shell:
+
+```bash
+# Delete the Cloud Run service (replace with your actual service name if different)
+gcloud run services delete markettech-truth-engine \
+  --region=us-central1 \
+  --quiet
+
+# Delete the Artifact Registry repo used by this demo (irreversible)
+gcloud artifacts repositories delete markettech \
+  --location=us-central1 \
+  --quiet
+
+# (Optional) Delete the OpenAI API key from Secret Manager
+gcloud secrets delete openai-api-key --quiet
+```
 
 ---
 

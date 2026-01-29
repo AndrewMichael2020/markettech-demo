@@ -250,7 +250,7 @@ def main() -> None:
         """
         <style>
         .main .block-container {
-            padding-top: 0.75rem;
+            padding-top: 0.25rem;
             padding-bottom: 2.0rem;
             max-width: 1200px;
         }
