@@ -265,6 +265,19 @@ people setting up the hosted version of the app.
 
 ### High‑level deployment steps
 
+0. **Create the Artifact Registry repo via Cloud Shell**
+
+```bash
+# Make sure you are on the right project
+gcloud config set project studio-1697788595-a34f5
+
+# Create a Docker Artifact Registry repo named "markettech" in us-central1
+gcloud artifacts repositories create markettech \
+  --repository-format=docker \
+  --location=us-central1 \
+  --description="Docker repo for MarketTech demo"
+```
+
 1. **In Google Cloud**
    - Create or choose a project (e.g. `studio-1697788595-a34f5`).
    - Enable Artifact Registry, Cloud Run, and Cloud Build.
