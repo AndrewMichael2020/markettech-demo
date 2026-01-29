@@ -6,13 +6,12 @@ This workshop kit moves a mixed audience from an **Excel mindset** to a **system
 Notebook (R&D) → App (Product) → Cloud Run (Deployment).
 
 ## Badges
-Replace `<OWNER>/<REPO>` after you create the GitHub repo.
 
-- CI: `https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml`
-- Docker build: `https://github.com/<OWNER>/<REPO>/actions/workflows/docker.yml`
+- CI: `https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/ci.yml`
+- Docker build: `https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/docker.yml`
 
-![CI](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml/badge.svg)
-![Docker build](https://github.com/<OWNER>/<REPO>/actions/workflows/docker.yml/badge.svg)
+![CI](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/ci.yml/badge.svg)
+![Docker build](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/docker.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 
 ## What you will demo
