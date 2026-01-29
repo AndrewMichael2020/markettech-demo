@@ -20,11 +20,24 @@ already know from analytics work.
 
 ## Status badges
 
-CI and Docker workflows run on GitHub Actions:
+CI / Docker / quality:
 
 ![CI](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/ci.yml/badge.svg)
 ![Docker build](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/docker.yml/badge.svg)
+![Tests](https://img.shields.io/github/actions/workflow/status/AndrewMichael2020/markettech-demo/ci.yml?label=tests&logo=github)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+
+Tech stack:
+
+![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white)
+![Streamlit](https://img.shields.io/badge/App-Streamlit-ff4b4b?logo=streamlit&logoColor=white)
+![DuckDB](https://img.shields.io/badge/Warehouse-DuckDB-yellow?logo=duckdb&logoColor=white)
+![Jupyter](https://img.shields.io/badge/Notebook-Jupyter-F37626?logo=jupyter&logoColor=white)
+![OpenAI](https://img.shields.io/badge/AI-OpenAI-412991?logo=openai&logoColor=white)
+
+Collaboration:
+
+![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
 
 ---
 
