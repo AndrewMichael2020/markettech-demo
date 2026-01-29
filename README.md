@@ -1,6 +1,6 @@
 ## NorthPeak Retail / MarketTech demo
 
-This repo contains a **teaching demo** for data analytics students.
+This repo contains a **teaching demo** for data analytics students.It was developed with assistance from ChatGPT, GitHub Copilot, GitHub Workspaces, GitHub Actions, Google Cloud Run, and Google Cloud Build. 
 
 You start with raw events (website sessions and purchases) and gradually turn
 them into a **trustworthy metric** behind a Streamlit app and a Cloud Run URL.
