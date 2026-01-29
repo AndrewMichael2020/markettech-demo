@@ -244,6 +244,14 @@ This is a suggested lesson plan if you are teaching this workshop.
 
 ---
 
+The App
+
+<img width="1863" height="857" alt="Screenshot 2026-01-29 011458" src="https://github.com/user-attachments/assets/87a37cba-83ea-422c-80a6-fd56402bdbdb" />
+<img width="1887" height="937" alt="Screenshot 2026-01-29 011517" src="https://github.com/user-attachments/assets/ee2750d5-2c67-452a-9b01-dc02e8e21cc7" />
+<img width="1860" height="949" alt="Screenshot 2026-01-29 023404" src="https://github.com/user-attachments/assets/db99308f-0146-4045-adfe-aa2eae6215a4" />
+
+---
+
 ## Cloud Run and CI/CD (for instructors / DevOps)
 
 You do **not** need this section to learn analytics concepts. This is for
@@ -316,11 +324,13 @@ resources from Cloud Shell:
 # Delete the Cloud Run service (replace with your actual service name if different)
 gcloud run services delete markettech-truth-engine \
   --region=us-central1 \
+  --project=YOUR_PROJECT_ID \
   --quiet
 
 # Delete the Artifact Registry repo used by this demo (irreversible)
 gcloud artifacts repositories delete markettech \
   --location=us-central1 \
+  --project=YOUR_PROJECT_ID \
   --quiet
 
 # (Optional) Delete the OpenAI API key from Secret Manager
