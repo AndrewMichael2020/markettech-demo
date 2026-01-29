@@ -250,8 +250,8 @@ def main() -> None:
         """
         <style>
         .main .block-container {
-            padding-top: 2rem;
-            padding-bottom: 2.5rem;
+            padding-top: 0.75rem;
+            padding-bottom: 2.0rem;
             max-width: 1200px;
         }
         .hero-block {
