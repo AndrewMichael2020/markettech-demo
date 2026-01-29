@@ -92,23 +92,39 @@ def inject_corruption(df_sess: pd.DataFrame, df_conv: pd.DataFrame, frac: float 
     n_sess = len(df_sess2)
     n_conv = len(df_conv2)
 
+    # Mirror the workshop corruption strategy: add bad duplicates so that
+    # dropping them can fully restore the original dataset.
+
+    # 1) Negative revenue duplicates
     k = max(1, int(n_conv * frac))
     idx = df_conv2.sample(k, random_state=2026).index
-    df_conv2.loc[idx, "revenue"] = -df_conv2.loc[idx, "revenue"].abs()
+    neg_dupes = df_conv2.loc[idx].copy()
+    neg_dupes["revenue"] = -neg_dupes["revenue"].abs()
+    df_conv2 = pd.concat([df_conv2, neg_dupes], ignore_index=True)
 
-    # Future timestamps (sessions) - keep timezone-naive to avoid mixed dtypes
+    # 2) Future session duplicates (timezone-naive to avoid mixed dtypes)
     k2 = max(1, int(n_sess * frac))
     idx2 = df_sess2.sample(k2, random_state=2027).index
-    df_sess2.loc[idx2, "ts"] = dt.datetime.utcnow() + dt.timedelta(days=30)
+    future_dupes = df_sess2.loc[idx2].copy()
+    future_dupes["ts"] = dt.datetime.utcnow() + dt.timedelta(days=30)
+    df_sess2 = pd.concat([df_sess2, future_dupes], ignore_index=True)
 
+    # 3) Orphan conversion duplicates with guaranteed-missing session_id
     k3 = max(1, int(n_conv * frac))
     idx3 = df_conv2.sample(k3, random_state=2028).index
-    df_conv2.loc[idx3, "session_id"] = "999999999999"
+    orphan_dupes = df_conv2.loc[idx3].copy()
+    orphan_dupes["session_id"] = "999999999999"
+    df_conv2 = pd.concat([df_conv2, orphan_dupes], ignore_index=True)
 
     return df_sess2, df_conv2
 
 
 def build_semantic_view(con: duckdb.DuckDBPyConnection, window_days: int) -> None:
+    """(Re)build the semantic view used by the app.
+
+    Uses TRY_CAST for timestamps so that any corrupted values become NULL
+    instead of crashing the query engine.
+    """
     window_days = int(window_days)
     con.execute(f"""
     CREATE OR REPLACE VIEW f_attribution AS
@@ -116,19 +132,47 @@ def build_semantic_view(con: duckdb.DuckDBPyConnection, window_days: int) -> Non
         s.session_id,
         c.name AS channel_name,
         c.cac AS cost_per_acquisition,
-        CAST(s.ts AS TIMESTAMP) AS session_ts,
+        TRY_CAST(s.ts AS TIMESTAMP) AS session_ts,
         conv.revenue,
-        CAST(conv.ts AS TIMESTAMP) AS conversion_ts,
-        DATE_DIFF('day', CAST(s.ts AS TIMESTAMP), CAST(conv.ts AS TIMESTAMP)) AS days_to_convert,
+        TRY_CAST(conv.ts AS TIMESTAMP) AS conversion_ts,
+        DATE_DIFF('day', TRY_CAST(s.ts AS TIMESTAMP), TRY_CAST(conv.ts AS TIMESTAMP)) AS days_to_convert,
         CASE
             WHEN conv.session_id IS NOT NULL
-             AND DATE_DIFF('day', CAST(s.ts AS TIMESTAMP), CAST(conv.ts AS TIMESTAMP)) <= {window_days}
+             AND DATE_DIFF('day', TRY_CAST(s.ts AS TIMESTAMP), TRY_CAST(conv.ts AS TIMESTAMP)) <= {window_days}
             THEN 1 ELSE 0
         END AS is_attributed
     FROM raw_sessions s
     LEFT JOIN raw_conversions conv ON s.session_id = conv.session_id
     JOIN dim_channels c ON s.channel_id = c.id
     """)
+
+
+def semantic_contract_sql(window_days: int) -> str:
+    """Return the semantic SQL for the metric contract shown in the UI.
+
+    This mirrors build_semantic_view so the contract is visible to non-coders.
+    """
+    window_days = int(window_days)
+    return f"""
+-- Metric contract: attribution window = {window_days} day(s)
+CREATE OR REPLACE VIEW f_attribution AS
+SELECT
+    s.session_id,
+    c.name AS channel_name,
+    c.cac AS cost_per_acquisition,
+    TRY_CAST(s.ts AS TIMESTAMP) AS session_ts,
+    conv.revenue,
+    TRY_CAST(conv.ts AS TIMESTAMP) AS conversion_ts,
+    DATE_DIFF('day', TRY_CAST(s.ts AS TIMESTAMP), TRY_CAST(conv.ts AS TIMESTAMP)) AS days_to_convert,
+    CASE
+        WHEN conv.session_id IS NOT NULL
+         AND DATE_DIFF('day', TRY_CAST(s.ts AS TIMESTAMP), TRY_CAST(conv.ts AS TIMESTAMP)) <= {window_days}
+        THEN 1 ELSE 0
+    END AS is_attributed
+FROM raw_sessions s
+LEFT JOIN raw_conversions conv ON s.session_id = conv.session_id
+JOIN dim_channels c ON s.channel_id = c.id;
+"""
 
 
 def channel_summary(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
@@ -312,7 +356,7 @@ def main() -> None:
     st.line_chart(pivot)
 
     with st.expander("Show the semantic SQL (metric contract)"):
-        st.code(f"Attribution window: {window} days\n\nSee build_semantic_view() in app.py", language="text")
+        st.code(semantic_contract_sql(window), language="sql")
 
 
 if __name__ == "__main__":

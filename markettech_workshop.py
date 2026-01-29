@@ -120,21 +120,21 @@ def generate_stream(days: int = 60, start_date: dt.date = dt.date(2025, 9, 1), s
     return sessions, conversions, df_chan
 
 
-df_sess, df_conv, df_chan = generate_stream(days=60)
-print(f"Stream Online: {len(df_sess):,} sessions | {len(df_conv):,} purchases")
-df_sess.head(3)
+def _bootstrap_demo() -> tuple[duckdb.DuckDBPyConnection, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Create an in-memory DuckDB connection and register a fresh demo stream.
 
-# %% [markdown]
-# ## Phase 2: Storage (DuckDB)
-# We load raw tables into an in-process OLAP engine, then speak SQL.
+    This is used only for the notebook/demo flow and is never executed when the
+    module is imported for tests.
+    """
+    df_sess, df_conv, df_chan = generate_stream(days=60)
+    print(f"Stream Online: {len(df_sess):,} sessions | {len(df_conv):,} purchases")
 
-# %%
-con = duckdb.connect(database=":memory:")
-con.register("raw_sessions", df_sess)
-con.register("raw_conversions", df_conv)
-con.register("dim_channels", df_chan)
+    con = duckdb.connect(database=":memory:")
+    con.register("raw_sessions", df_sess)
+    con.register("raw_conversions", df_conv)
+    con.register("dim_channels", df_chan)
+    return con, df_sess, df_conv, df_chan
 
-con.execute("SELECT COUNT(*) AS sessions FROM raw_sessions").df()
 
 # %% [markdown]
 # ## Phase 3: Metric contract (Semantic Layer)
@@ -145,6 +145,12 @@ con.execute("SELECT COUNT(*) AS sessions FROM raw_sessions").df()
 
 # %%
 def build_semantic_view(con: duckdb.DuckDBPyConnection, window_days: int = 7) -> None:
+    """(Re)build the semantic view in a timestamp-resilient way.
+
+    We use TRY_CAST for all raw timestamp fields so that any corrupted
+    values simply fall out of the attribution logic instead of crashing
+    the query engine.
+    """
     window_days = int(window_days)
     con.execute(f"""
     CREATE OR REPLACE VIEW f_attribution AS
@@ -152,15 +158,15 @@ def build_semantic_view(con: duckdb.DuckDBPyConnection, window_days: int = 7) ->
         s.session_id,
         c.name AS channel_name,
         c.cac AS cost_per_acquisition,
-        CAST(s.ts AS TIMESTAMP) AS session_ts,
+        TRY_CAST(s.ts AS TIMESTAMP) AS session_ts,
         conv.revenue,
-        CAST(conv.ts AS TIMESTAMP) AS conversion_ts,
+        TRY_CAST(conv.ts AS TIMESTAMP) AS conversion_ts,
 
-        DATE_DIFF('day', CAST(s.ts AS TIMESTAMP), CAST(conv.ts AS TIMESTAMP)) AS days_to_convert,
+        DATE_DIFF('day', TRY_CAST(s.ts AS TIMESTAMP), TRY_CAST(conv.ts AS TIMESTAMP)) AS days_to_convert,
 
         CASE
             WHEN conv.session_id IS NOT NULL
-             AND DATE_DIFF('day', CAST(s.ts AS TIMESTAMP), CAST(conv.ts AS TIMESTAMP)) <= {window_days}
+             AND DATE_DIFF('day', TRY_CAST(s.ts AS TIMESTAMP), TRY_CAST(conv.ts AS TIMESTAMP)) <= {window_days}
             THEN 1 ELSE 0
         END AS is_attributed
     FROM raw_sessions s
@@ -169,10 +175,6 @@ def build_semantic_view(con: duckdb.DuckDBPyConnection, window_days: int = 7) ->
     JOIN dim_channels c
         ON s.channel_id = c.id
     """)
-
-
-build_semantic_view(con, window_days=7)
-con.execute("SELECT * FROM f_attribution WHERE revenue IS NOT NULL LIMIT 5").df()
 
 # %% [markdown]
 # ## Phase 4: Truth vs Fiction
@@ -196,17 +198,9 @@ def channel_summary(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.execute(sql).df()
 
 
-df_truth = channel_summary(con)
-df_truth
-
-# %% [markdown]
-# ### Exercise: change the contract
-# Change the attribution window to 30 days and re-run the summary.
-# What shifts? Who “wins” now?
-
-# %%
-build_semantic_view(con, window_days=30)
-channel_summary(con)
+def _demo_channel_summary(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """Helper used only in the interactive demo to show channel performance."""
+    return channel_summary(con)
 
 # %% [markdown]
 # ## Phase 5: Data Quality Gates
@@ -214,6 +208,13 @@ channel_summary(con)
 
 # %%
 def run_quality_checks(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """Run basic data quality checks in a way that tolerates bad timestamps.
+
+    - Negative revenue in conversions
+    - Orphaned conversions (no matching session)
+    - Invalid session timestamps (values that cannot be cast to TIMESTAMP)
+    - Future session timestamps (relative to NOW(), compared as TIMESTAMP)
+    """
     checks = [
         ("Negative revenue", "SELECT COUNT(*) AS n FROM raw_conversions WHERE revenue < 0"),
         ("Orphaned conversions", """
@@ -222,7 +223,17 @@ def run_quality_checks(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
             LEFT JOIN raw_sessions s ON c.session_id = s.session_id
             WHERE s.session_id IS NULL
         """),
-        ("Future session timestamps", "SELECT COUNT(*) AS n FROM raw_sessions WHERE CAST(ts AS TIMESTAMP) > NOW()"),
+        ("Invalid session timestamps", """
+            SELECT COUNT(*) AS n
+            FROM raw_sessions
+            WHERE ts IS NOT NULL
+              AND TRY_CAST(ts AS TIMESTAMP) IS NULL
+        """),
+        ("Future session timestamps", """
+            SELECT COUNT(*) AS n
+            FROM raw_sessions
+            WHERE TRY_CAST(ts AS TIMESTAMP) > CAST(NOW() AS TIMESTAMP)
+        """),
     ]
 
     rows = []
@@ -230,10 +241,6 @@ def run_quality_checks(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         n = int(con.execute(sql).fetchone()[0])
         rows.append({"check": name, "errors": n, "status": "PASS" if n == 0 else "FAIL"})
     return pd.DataFrame(rows)
-
-
-dq = run_quality_checks(con)
-dq
 
 
 # %% [markdown]
@@ -266,40 +273,46 @@ def inject_corruption(df_sess: pd.DataFrame, df_conv: pd.DataFrame, frac: float 
     n_sess = len(df_sess2)
     n_conv = len(df_conv2)
 
-    # Negative revenue
+    # Instead of mutating existing rows, we ADD obviously bad duplicates so
+    # that a drop-only cleaning plan can restore the original dataset exactly.
+
+    # 1) Negative revenue duplicates
     k = max(1, int(n_conv * frac))
     idx = df_conv2.sample(k, random_state=2026).index
-    df_conv2.loc[idx, "revenue"] = -df_conv2.loc[idx, "revenue"].abs()
+    neg_dupes = df_conv2.loc[idx].copy()
+    neg_dupes["revenue"] = -neg_dupes["revenue"].abs()
+    df_conv2 = pd.concat([df_conv2, neg_dupes], ignore_index=True)
 
-    # Future timestamps (sessions) - keep timezone-naive to avoid mixed dtypes
+    # 2) Future session duplicates (timezone-naive to avoid mixed dtypes)
     k2 = max(1, int(n_sess * frac))
     idx2 = df_sess2.sample(k2, random_state=2027).index
-    df_sess2.loc[idx2, "ts"] = dt.datetime.utcnow() + dt.timedelta(days=30)
+    future_dupes = df_sess2.loc[idx2].copy()
+    future_dupes["ts"] = dt.datetime.utcnow() + dt.timedelta(days=30)
+    df_sess2 = pd.concat([df_sess2, future_dupes], ignore_index=True)
 
-    # Orphan conversions: create fake session ids
+    # 3) Orphan conversion duplicates with a guaranteed-missing session_id
     k3 = max(1, int(n_conv * frac))
     idx3 = df_conv2.sample(k3, random_state=2028).index
-    df_conv2.loc[idx3, "session_id"] = "999999999999"  # guaranteed orphan
+    orphan_dupes = df_conv2.loc[idx3].copy()
+    orphan_dupes["session_id"] = "999999999999"  # guaranteed orphan
+    df_conv2 = pd.concat([df_conv2, orphan_dupes], ignore_index=True)
 
     return df_sess2, df_conv2
 
 
-USE_CORRUPT_DATA = True  # flip to False if you want the checks to already pass
+def _run_ai_demo(df_sess: pd.DataFrame, df_conv: pd.DataFrame, df_chan: pd.DataFrame) -> None:
+    """Run the optional AI cleaning demo on a (possibly) corrupted dataset."""
+    df_sess_demo, df_conv_demo = inject_corruption(df_sess, df_conv)
 
-df_sess_demo, df_conv_demo = (inject_corruption(df_sess, df_conv) if USE_CORRUPT_DATA else (df_sess, df_conv))
+    con_demo = duckdb.connect(database=":memory:")
+    con_demo.register("raw_sessions", df_sess_demo)
+    con_demo.register("raw_conversions", df_conv_demo)
+    con_demo.register("dim_channels", df_chan)
 
-# Re-register demo data for checks
-con_demo = duckdb.connect(database=":memory:")
-con_demo.register("raw_sessions", df_sess_demo)
-con_demo.register("raw_conversions", df_conv_demo)
-con_demo.register("dim_channels", df_chan)
+    print("Quality checks BEFORE AI cleaning (demo dataset):")
+    dq_before = run_quality_checks(con_demo)
+    print(dq_before)
 
-print("Quality checks BEFORE AI cleaning (demo dataset):")
-dq_before = run_quality_checks(con_demo)
-dq_before
-
-# %%
-if __name__ == "__main__":
     if os.getenv("OPENAI_API_KEY", "").strip():
         result = run_agentic_cleaning_loop(
             sessions=df_sess_demo,
@@ -315,7 +328,6 @@ if __name__ == "__main__":
         print("AI judge verdict:")
         print(result["judge"])
 
-        # Use cleaned data going forward (optional)
         df_sess_clean = result["sessions_clean"]
         df_conv_clean = result["conversions_clean"]
 
@@ -325,33 +337,43 @@ if __name__ == "__main__":
         con_clean.register("dim_channels", df_chan)
 
         print("Quality checks AFTER AI cleaning:")
-        run_quality_checks(con_clean)
+        print(run_quality_checks(con_clean))
     else:
         print("OPENAI_API_KEY is not set. Skipping AI cleaning demo.")
 
 
-# %% [markdown]
-# ## Phase 6: Prototype Visualization
-# We plot weekly trusted conversions by channel.
+def _plot_weekly_trend(con: duckdb.DuckDBPyConnection) -> None:
+    """Plot weekly trusted conversions by channel for the demo."""
+    build_semantic_view(con, window_days=7)
 
-# %%
-# Rebuild with the default 7-day contract
-build_semantic_view(con, window_days=7)
+    trend_sql = """
+    SELECT
+        DATE_TRUNC('week', session_ts) AS week,
+        channel_name,
+        SUM(is_attributed) AS sales
+    FROM f_attribution
+    GROUP BY 1, 2
+    ORDER BY 1, 2
+    """
+    df_viz = con.execute(trend_sql).df()
 
-trend_sql = """
-SELECT
-    DATE_TRUNC('week', session_ts) AS week,
-    channel_name,
-    SUM(is_attributed) AS sales
-FROM f_attribution
-GROUP BY 1, 2
-ORDER BY 1, 2
-"""
-df_viz = con.execute(trend_sql).df()
+    pivot = df_viz.pivot(index="week", columns="channel_name", values="sales").fillna(0)
 
-pivot = df_viz.pivot(index="week", columns="channel_name", values="sales").fillna(0)
+    pivot.plot(kind="line", figsize=(10, 5), title="Weekly Attributed Sales by Channel")
+    plt.ylabel("Trusted conversions (count)")
+    plt.xlabel("Week")
+    plt.show()
 
-pivot.plot(kind="line", figsize=(10, 5), title="Weekly Attributed Sales by Channel")
-plt.ylabel("Trusted conversions (count)")
-plt.xlabel("Week")
-plt.show()
+
+if __name__ == "__main__":
+    # Full notebook-style demo, executed only when run as a script.
+    con, df_sess, df_conv, df_chan = _bootstrap_demo()
+
+    build_semantic_view(con, window_days=7)
+    print(_demo_channel_summary(con))
+
+    # Optional AI cleaning + judge demo on a corrupted copy of the stream.
+    _run_ai_demo(df_sess, df_conv, df_chan)
+
+    # Phase 6: prototype visualization
+    _plot_weekly_trend(con)

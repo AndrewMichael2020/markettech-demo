@@ -34,10 +34,9 @@ def _now_iso() -> str:
 
 
 ALLOWED_OPS = {
-    "drop_conversions_where",  # args: {"where_sql": "revenue < 0"}
-    "drop_orphan_conversions", # args: {"sessions_table": "raw_sessions", "conversions_table": "raw_conversions"}
-    "fix_negative_revenue_abs",# args: {"revenue_col": "revenue"}
-    "drop_future_sessions",    # args: {"ts_col": "ts"}
+    "drop_negative_revenue",   # drop rows where revenue < 0
+    "drop_orphan_conversions", # drop conversions whose session_id is missing in raw_sessions
+    "drop_future_sessions",    # drop sessions with future timestamps
 }
 
 
@@ -62,14 +61,40 @@ def summarize_quality(con: duckdb.DuckDBPyConnection) -> Dict[str, Any]:
     Returns counts for the same three checks used in the notebook.
     """
     checks = {
-        "negative_revenue": int(con.execute("SELECT COUNT(*) FROM raw_conversions WHERE revenue < 0").fetchone()[0]),
-        "orphaned_conversions": int(con.execute("""
-            SELECT COUNT(*)
-            FROM raw_conversions c
-            LEFT JOIN raw_sessions s ON c.session_id = s.session_id
-            WHERE s.session_id IS NULL
-        """).fetchone()[0]),
-        "future_session_timestamps": int(con.execute("SELECT COUNT(*) FROM raw_sessions WHERE CAST(ts AS TIMESTAMP) > NOW()").fetchone()[0]),
+        "negative_revenue": int(
+            con.execute("SELECT COUNT(*) FROM raw_conversions WHERE revenue < 0").fetchone()[0]
+        ),
+        "orphaned_conversions": int(
+            con.execute(
+                """
+                SELECT COUNT(*)
+                FROM raw_conversions c
+                LEFT JOIN raw_sessions s ON c.session_id = s.session_id
+                WHERE s.session_id IS NULL
+                """
+            ).fetchone()[0]
+        ),
+        # Any ts values that cannot be parsed into a TIMESTAMP are counted as invalid
+        "invalid_session_timestamps": int(
+            con.execute(
+                """
+                SELECT COUNT(*)
+                FROM raw_sessions
+                WHERE ts IS NOT NULL
+                  AND TRY_CAST(ts AS TIMESTAMP) IS NULL
+                """
+            ).fetchone()[0]
+        ),
+        # Future timestamps are computed using TRY_CAST and comparing against NOW() cast to TIMESTAMP
+        "future_session_timestamps": int(
+            con.execute(
+                """
+                SELECT COUNT(*)
+                FROM raw_sessions
+                WHERE TRY_CAST(ts AS TIMESTAMP) > CAST(NOW() AS TIMESTAMP)
+                """
+            ).fetchone()[0]
+        ),
     }
     return checks
 
@@ -99,38 +124,36 @@ def apply_plan(
         if step.op not in ALLOWED_OPS:
             raise ValueError(f"Plan contains disallowed op: {step.op}")
 
+        prev_sess_rows = len(sess_cur)
+        prev_conv_rows = len(conv_cur)
+
         con = duckdb.connect(database=":memory:")
         con.register("raw_sessions", sess_cur)
         con.register("raw_conversions", conv_cur)
         con.register("dim_channels", chan_cur)
 
-        if step.op == "drop_conversions_where":
-            where_sql = str(step.args.get("where_sql", "")).strip()
-            if not where_sql:
-                raise ValueError("drop_conversions_where requires where_sql")
+        if step.op == "drop_negative_revenue":
+            # Drop only rows that have negative revenue; original rows with
+            # non-negative revenue remain, so duplicates introduced by corruption
+            # can be fully removed.
             conv_cur = con.execute(
-                f"SELECT * FROM raw_conversions WHERE NOT ({where_sql})"
+                """
+                SELECT *
+                FROM raw_conversions
+                WHERE revenue >= 0 OR revenue IS NULL
+                """
             ).df()
 
         elif step.op == "drop_orphan_conversions":
+            # Keep only conversions whose session_id exists in raw_sessions, but
+            # do so without duplicating rows even if session_ids collide.
             conv_cur = con.execute(
                 """
                 SELECT c.*
                 FROM raw_conversions c
-                JOIN raw_sessions s ON c.session_id = s.session_id
-                """
-            ).df()
-
-        elif step.op == "fix_negative_revenue_abs":
-            revenue_col = str(step.args.get("revenue_col", "revenue"))
-            conv_cur = con.execute(
-                f"""
-                SELECT
-                    event_type,
-                    session_id,
-                    ts,
-                    CASE WHEN {revenue_col} < 0 THEN ABS({revenue_col}) ELSE {revenue_col} END AS {revenue_col}
-                FROM raw_conversions
+                WHERE EXISTS (
+                    SELECT 1 FROM raw_sessions s WHERE s.session_id = c.session_id
+                )
                 """
             ).df()
 
@@ -140,12 +163,23 @@ def apply_plan(
                 f"""
                 SELECT *
                 FROM raw_sessions
-                WHERE CAST({ts_col} AS TIMESTAMP) <= NOW()
+                WHERE TRY_CAST({ts_col} AS TIMESTAMP) <= CAST(NOW() AS TIMESTAMP)
                 """
             ).df()
 
         # Close per-step connection
         con.close()
+
+        # Hard guard: cleaning steps must not increase row counts.
+        new_sess_rows = len(sess_cur)
+        new_conv_rows = len(conv_cur)
+        if new_sess_rows > prev_sess_rows or new_conv_rows > prev_conv_rows:
+            raise RuntimeError(
+                "Cleaning step expanded row counts, which is not allowed. "
+                f"op={step.op}, "
+                f"sessions_before={prev_sess_rows}, sessions_after={new_sess_rows}, "
+                f"conversions_before={prev_conv_rows}, conversions_after={new_conv_rows}"
+            )
 
     # Final quality summary on the cleaned tables
     con_final = duckdb.connect(database=":memory:")
@@ -256,9 +290,11 @@ def judge_cleaning_result(
 
     system = (
         "You are a strict data quality judge. "
-        "Decide PASS only if all check counts are zero and the plan is reasonable "
-        "(no unnecessary data loss). "
-        "Output ONLY valid JSON (no markdown)."
+        "Decide PASS if and only if: (a) all quality check counts after cleaning are zero, "
+        "(b) no table's row count increased compared to before cleaning, and (c) the "
+        "fraction of rows dropped is not obviously excessive relative to the starting data. "
+        "If these conditions hold you MUST return verdict=\"pass\". Otherwise return "
+        "verdict=\"fail\" with clear reasons. Output ONLY valid JSON (no markdown)."
     )
 
     payload = {
@@ -274,7 +310,13 @@ def judge_cleaning_result(
         },
         "rules": {
             "must_zero_all_checks": True,
-            "max_drop_fraction_soft_limit": 0.05,  # soft guideline for the judge
+            "max_drop_fraction_soft_limit": 0.05,
+            "non_expansion_enforced_in_code": True,
+            "instructional_note": (
+                "If all checks_after are zero and no rows increased, and the fraction "
+                "of dropped rows in any table is <= max_drop_fraction_soft_limit, you "
+                "should treat the cleaning as successful and set verdict to 'pass'."
+            ),
         },
         "instruction": 'Return JSON: {"verdict":"pass"|"fail","reasons":[...],"next_action":"..."}',
     }
@@ -288,12 +330,6 @@ def judge_cleaning_result(
         text={"format": {"type": "json_object"}},
     )
     result = json.loads(resp.output_text)
-
-    # Workshop-friendly override: if all checks are zero after cleaning, we
-    # treat this as a PASS regardless of the model's narrative.
-    if all(int(v) == 0 for v in checks_after.values()):
-        result["verdict"] = "pass"
-
     return result
 
 
