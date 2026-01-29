@@ -154,24 +154,70 @@ def semantic_contract_sql(window_days: int) -> str:
     """
     window_days = int(window_days)
     return f"""
+-- ============================================================
+-- METRIC CONTRACT (DATA CONTRACT): f_attribution
+-- ============================================================
+-- Purpose:
+-- This view is the “single source of truth” for one metric:
+-- whether a purchase is counted as a conversion for a session.
+--
+-- Contract idea (plain language):
+-- We only credit a purchase to a session if it happens within
+-- the attribution window after that session.
+--
+-- Why it is a contract:
+-- Everyone (Marketing, Finance, Analytics) agrees that this SQL
+-- definition is the rule. If the rule changes, the metric changes.
+-- ============================================================
+
 -- Metric contract: attribution window = {window_days} day(s)
 CREATE OR REPLACE VIEW f_attribution AS
 SELECT
+    -- Identifiers we need to join and group results reliably
     s.session_id,
+
+    -- Dimension fields (what we will group by in reports)
     c.name AS channel_name,
     c.cac AS cost_per_acquisition,
+
+    -- Timestamps (standardized to TIMESTAMP so time rules are consistent)
     TRY_CAST(s.ts AS TIMESTAMP) AS session_ts,
-    conv.revenue,
     TRY_CAST(conv.ts AS TIMESTAMP) AS conversion_ts,
-    DATE_DIFF('day', TRY_CAST(s.ts AS TIMESTAMP), TRY_CAST(conv.ts AS TIMESTAMP)) AS days_to_convert,
+
+    -- Business value (revenue of the purchase event, if it exists)
+    conv.revenue,
+
+    -- Contract field: time between session and purchase
+    -- This is the key input to the attribution rule.
+    DATE_DIFF(
+        'day',
+        TRY_CAST(s.ts AS TIMESTAMP),
+        TRY_CAST(conv.ts AS TIMESTAMP)
+    ) AS days_to_convert,
+
+    -- Contract output: is_attributed (0/1)
+    -- Rule:
+    -- 1) there must be a purchase event linked to this session
+    -- 2) it must occur within the attribution window (<= 7 days)
     CASE
         WHEN conv.session_id IS NOT NULL
-         AND DATE_DIFF('day', TRY_CAST(s.ts AS TIMESTAMP), TRY_CAST(conv.ts AS TIMESTAMP)) <= {window_days}
+         AND DATE_DIFF(
+                'day',
+                TRY_CAST(s.ts AS TIMESTAMP),
+                TRY_CAST(conv.ts AS TIMESTAMP)
+             ) <= 7
         THEN 1 ELSE 0
     END AS is_attributed
+
 FROM raw_sessions s
-LEFT JOIN raw_conversions conv ON s.session_id = conv.session_id
-JOIN dim_channels c ON s.channel_id = c.id;
+
+-- Keep all sessions, even those with no purchase, so conversion rate is accurate
+LEFT JOIN raw_conversions conv
+    ON s.session_id = conv.session_id
+
+-- Attach channel metadata (names and cost assumptions)
+JOIN dim_channels c
+    ON s.channel_id = c.id;
 """
 
 
@@ -197,16 +243,115 @@ def load_engine(days: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 
 def main() -> None:
-    st.set_page_config(page_title="MarketTech Truth Engine", layout="wide")
-    st.title("MarketTech Truth Engine")
-    st.caption("Prototype: metric contracts + reproducible event replay")
+    st.set_page_config(page_title="NorthPeak Retail", layout="wide")
+
+    # Global style tweaks for workshop presentation (typography, cards, spacing).
+    st.markdown(
+        """
+        <style>
+        .main .block-container {
+            padding-top: 2rem;
+            padding-bottom: 2.5rem;
+            max-width: 1200px;
+        }
+        .hero-block {
+            padding: 1.25rem 1.5rem 1.5rem 1.5rem;
+            border-radius: 0.85rem;
+            background: linear-gradient(135deg, #e0f2fe 0%, #ecfeff 40%, #ffffff 100%);
+            border: 1px solid rgba(15, 118, 110, 0.12);
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.06);
+            margin-bottom: 1.5rem;
+        }
+        .hero-title {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+            color: #0f172a;
+        }
+        .hero-subtitle {
+            font-size: 1.0rem;
+            color: #0f766e;
+            margin-bottom: 0.75rem;
+        }
+        .hero-body {
+            font-size: 0.95rem;
+            color: #334155;
+            margin-bottom: 0.5rem;
+        }
+        .hero-try-list {
+            margin-top: 0.4rem;
+            margin-bottom: 0;
+            padding-left: 1.3rem;
+            color: #1e293b;
+            font-size: 0.9rem;
+        }
+        .hero-try-list li {
+            margin-bottom: 0.15rem;
+        }
+        .metric-card {
+            background-color: #ffffff;
+            border-radius: 0.9rem;
+            padding: 0.85rem 1.1rem;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+            border: 1px solid rgba(148, 163, 184, 0.25);
+        }
+        .metric-label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #6b7280;
+            margin-bottom: 0.25rem;
+        }
+        .metric-value {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #0f766e;
+        }
+        .metric-footnote {
+            font-size: 0.85rem;
+            color: #4b5563;
+            margin-top: 0.75rem;
+        }
+        .section-spacer {
+            margin-top: 1.75rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Hero section
+    st.markdown(
+        """
+        <div class="hero-block">
+          <h1 class="hero-title">NorthPeak Retail</h1>
+          <p class="hero-subtitle">
+            Learn about the workflow: event data → Database tables → SQL metric rules → quality checks → an enterprise dashboard.
+          </p>
+          <p class="hero-body">
+            In this workshop you will act not as the data analyst only but as the analytics engineer. <br>
+            You will replay events, define a conversion rule in SQL, and see how metrics change when the definition changes.
+          </p>
+          <ul class="hero-try-list">
+            <li>Move the attribution contract window from 7 → 30 days.</li>
+            <li>Turn on demo anomalies and watch the quality checks respond.</li>
+            <li>Optionally run the AI cleaner and review the plan + judge verdict.</li>
+          </ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     with st.sidebar:
-        st.header("Controls")
-        days = st.slider("Days of simulated history", min_value=14, max_value=120, value=60, step=7)
-        window = st.slider("Attribution window (days)", min_value=1, max_value=30, value=7, step=1)
-        inject_clicked = st.button("Inject bad data (for demo)")
-        ai_clicked = st.button("Use AI cleaning agent")
+        st.header("Filters")
+        days = st.slider("History window (days)", min_value=14, max_value=120, value=120, step=7)
+        st.caption("How many days of events we load into the database for analysis.")
+        window = st.slider("Attribution contract window (days)", min_value=1, max_value=30, value=7, step=1)
+        st.caption("How many days after a visit we still credit a purchase to that channel")
+        inject_clicked = st.button("Inject demo anomalies")
+        st.caption("Adds a small number of intentional issues so the quality checks have something to catch.")
+        ai_clicked = st.button("Run AI cleaner + judge")
+        st.caption("AI proposes a fix plan. A judge verifies the result. The pipeline stays deterministic.")
         st.caption("AI requires OPENAI_API_KEY on the server.")
 
     # Session state for current engine data and AI results
@@ -286,16 +431,94 @@ def main() -> None:
     build_semantic_view(con, window_days=window)
     df = channel_summary(con)
 
-    # Executive metrics
+    # Executive summary cards
+    st.subheader("Executive summary")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Sessions", f"{len(df_sess):,}")
-    c2.metric("Purchases (raw)", f"{len(df_conv):,}")
-    c3.metric("Contract window", f"{window} days")
-    c4.metric("Trusted conversions", f"{int(df['trusted_conversions'].sum()):,}")
+    with c1:
+        st.markdown(
+            f"""
+            <div class="metric-card">
+              <div class="metric-label">Sessions</div>
+              <div class="metric-value">{len(df_sess):,}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            f"""
+            <div class="metric-card">
+              <div class="metric-label">Purchases (raw)</div>
+              <div class="metric-value">{len(df_conv):,}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c3:
+        st.markdown(
+            f"""
+            <div class="metric-card">
+              <div class="metric-label">Attribution contract window</div>
+              <div class="metric-value">{window} days</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c4:
+        st.markdown(
+            f"""
+            <div class="metric-card">
+              <div class="metric-label">Trusted conversions</div>
+              <div class="metric-value">{int(df['trusted_conversions'].sum()):,}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    st.markdown(
+        "<p class=\"metric-footnote\">These KPIs are produced by the contract below. Change the contract window to change the results.</p>",
+        unsafe_allow_html=True,
+    )
 
-    if ai_result is not None:
-        st.subheader("AI cleaning verdict")
+    # Channel performance and conversion views (move higher in the layout)
+    st.markdown("<div class=\"section-spacer\"></div>", unsafe_allow_html=True)
+    st.subheader("Channel performance")
+    st.markdown("What to look for: compare naive vs contract-based conversions to see the impact of the definition.")
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
+    st.subheader("Conversions by channel")
+    chart_df = df.set_index("channel_name")[["trusted_conversions", "naive_conversions", "out_of_window"]]
+    st.bar_chart(chart_df)
+
+    st.subheader("Weekly conversions trend")
+    st.markdown("What to look for: watch how the contract window changes the trendlines.")
+    trend_sql = """
+    SELECT
+        DATE_TRUNC('week', session_ts) AS week,
+        channel_name,
+        SUM(is_attributed) AS sales
+    FROM f_attribution
+    GROUP BY 1, 2
+    ORDER BY 1, 2
+    """
+    df_trend = con.execute(trend_sql).df()
+    pivot = df_trend.pivot(index="week", columns="channel_name", values="sales").fillna(0)
+    st.line_chart(pivot)
+
+    # Metric contract + quality section
+    st.markdown("<div class=\"section-spacer\"></div>", unsafe_allow_html=True)
+    st.subheader("Metric contract + quality checks")
+    st.markdown(
+        "This SQL is a rule ('data contract'). It defines which purchases we attribute as conversions from sessions. Clear rules make metrics consistent.")
+
+    with st.expander("View the contract SQL"):
+        st.code(semantic_contract_sql(window), language="sql")
+
+    # AI cleaning section
+    st.markdown("<div class=\"section-spacer\"></div>", unsafe_allow_html=True)
+    st.subheader("Data cleaning with an GenAI agent")
+    if ai_result is None:
+        st.info("Quality checks run deterministically. GenAI agentic workflows are becoming crucial for data quality analysis and improvement.")
+    else:
         checks_before = ai_result.get("checks_before", {}) or {}
         checks_after = ai_result.get("checks_after", {}) or {}
         plan = ai_result.get("plan", {}) or {}
@@ -327,36 +550,12 @@ def main() -> None:
             else:
                 st.info("No cleaning steps were proposed.")
 
-        verdict = judge.get("verdict", "unknown")
-        st.markdown(f"**Judge verdict:** `{verdict}`")
+        verdict_raw = (judge or {}).get("verdict", "")
+        verdict_label = "PASS" if str(verdict_raw).lower() == "pass" else "REVIEW"
+        st.markdown(f"**Judge verdict:** `{verdict_label}`")
         if judge.get("reasons"):
             with st.expander("Show judge reasoning"):
                 st.json(judge)
-
-
-    st.subheader("Channel performance")
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    st.subheader("Trusted conversions by channel")
-    chart_df = df.set_index("channel_name")[["trusted_conversions", "naive_conversions", "out_of_window"]]
-    st.bar_chart(chart_df)
-
-    st.subheader("Weekly trusted conversions trend")
-    trend_sql = """
-    SELECT
-        DATE_TRUNC('week', session_ts) AS week,
-        channel_name,
-        SUM(is_attributed) AS sales
-    FROM f_attribution
-    GROUP BY 1, 2
-    ORDER BY 1, 2
-    """
-    df_trend = con.execute(trend_sql).df()
-    pivot = df_trend.pivot(index="week", columns="channel_name", values="sales").fillna(0)
-    st.line_chart(pivot)
-
-    with st.expander("Show the semantic SQL (metric contract)"):
-        st.code(semantic_contract_sql(window), language="sql")
 
 
 if __name__ == "__main__":
