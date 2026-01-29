@@ -16,6 +16,7 @@ htmlcov/
 venv/
 ENV/
 env/
+.env
 
 # Jupyter
 .ipynb_checkpoints/

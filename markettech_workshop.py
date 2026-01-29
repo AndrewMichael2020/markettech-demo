@@ -40,7 +40,7 @@ class Channel:
     cac: float  # cost per acquisition, dollars
 
 
-def generate_stream(days: int = 60, start_date: dt.date = dt.date(2025, 9, 1)) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def generate_stream(days: int = 60, start_date: dt.date = dt.date(2025, 9, 1), seed: int = 2026) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Generate a deterministic, workshop-friendly event stream.
     Returns:
@@ -48,6 +48,8 @@ def generate_stream(days: int = 60, start_date: dt.date = dt.date(2025, 9, 1)) -
       - conversions: purchase events
       - channels: channel dimension
     """
+    rng = np.random.default_rng(seed)
+
     channels = [
         Channel("CH_ORG", "Organic", 0.00),
         Channel("CH_SOC", "Paid Social", 12.50),
@@ -60,23 +62,23 @@ def generate_stream(days: int = 60, start_date: dt.date = dt.date(2025, 9, 1)) -
     dates = np.array([start_date + dt.timedelta(days=int(i)) for i in day_idx])
     is_weekend = np.array([d.weekday() >= 5 for d in dates], dtype=bool)
     base = np.where(is_weekend, 1500, 800)
-    vol = np.clip(np.random.normal(loc=base, scale=100).astype(int), 300, None)
+    vol = np.clip(rng.normal(loc=base, scale=100).astype(int), 300, None)
     total_sessions = int(vol.sum())
 
     # Session IDs
-    session_id = np.random.randint(100000, 999999, size=total_sessions).astype(str)
+    session_id = rng.integers(100000, 999999, size=total_sessions).astype(str)
 
     # Map each session to a day
     day_for_session = np.repeat(np.arange(days), vol)
     session_date = dates[day_for_session]
 
     # Channel assignment (weights chosen to make arguments plausible)
-    chan_ids = np.random.choice(["CH_ORG", "CH_SOC", "CH_EML"], p=[0.40, 0.40, 0.20], size=total_sessions)
+    chan_ids = rng.choice(["CH_ORG", "CH_SOC", "CH_EML"], p=[0.40, 0.40, 0.20], size=total_sessions)
 
     # Time within day
-    hour = np.random.randint(0, 24, size=total_sessions)
-    minute = np.random.randint(0, 60, size=total_sessions)
-    second = np.random.randint(0, 60, size=total_sessions)
+    hour = rng.integers(0, 24, size=total_sessions)
+    minute = rng.integers(0, 60, size=total_sessions)
+    second = rng.integers(0, 60, size=total_sessions)
 
     session_ts = np.array([dt.datetime.combine(d, dt.time(int(h), int(m), int(s)))
                            for d, h, m, s in zip(session_date, hour, minute, second)])
@@ -84,8 +86,8 @@ def generate_stream(days: int = 60, start_date: dt.date = dt.date(2025, 9, 1)) -
     # Engagement: Paid Social has shorter engagement
     engagement = np.where(
         chan_ids == "CH_SOC",
-        np.clip(np.random.normal(loc=30, scale=20, size=total_sessions).astype(int), 1, None),
-        np.clip(np.random.normal(loc=120, scale=60, size=total_sessions).astype(int), 5, None),
+        np.clip(rng.normal(loc=30, scale=20, size=total_sessions).astype(int), 1, None),
+        np.clip(rng.normal(loc=120, scale=60, size=total_sessions).astype(int), 5, None),
     )
 
     sessions = pd.DataFrame({
@@ -99,14 +101,14 @@ def generate_stream(days: int = 60, start_date: dt.date = dt.date(2025, 9, 1)) -
     # Conversion probability depends on engagement
     # - If engagement > 60 seconds: higher conversion chance
     base_prob = np.where(engagement > 60, 0.05, 0.005)
-    is_convert = np.random.random(size=total_sessions) < base_prob
+    is_convert = rng.random(size=total_sessions) < base_prob
 
     # For converted sessions, add lag (0-10 days) and revenue (50-200)
     conv_sessions = sessions.loc[is_convert, ["session_id", "ts"]].copy()
-    lag_days = np.random.randint(0, 11, size=len(conv_sessions))
-    lag_minutes = np.random.randint(5, 121, size=len(conv_sessions))
+    lag_days = rng.integers(0, 11, size=len(conv_sessions))
+    lag_minutes = rng.integers(5, 121, size=len(conv_sessions))
     conv_ts = conv_sessions["ts"].to_numpy() + pd.to_timedelta(lag_days, unit="D") + pd.to_timedelta(lag_minutes, unit="m")
-    revenue = np.round(np.random.uniform(50, 200, size=len(conv_sessions)), 2)
+    revenue = np.round(rng.uniform(50, 200, size=len(conv_sessions)), 2)
 
     conversions = pd.DataFrame({
         "event_type": "purchase",
@@ -269,10 +271,10 @@ def inject_corruption(df_sess: pd.DataFrame, df_conv: pd.DataFrame, frac: float 
     idx = df_conv2.sample(k, random_state=2026).index
     df_conv2.loc[idx, "revenue"] = -df_conv2.loc[idx, "revenue"].abs()
 
-    # Future timestamps (sessions)
+    # Future timestamps (sessions) - keep timezone-naive to avoid mixed dtypes
     k2 = max(1, int(n_sess * frac))
     idx2 = df_sess2.sample(k2, random_state=2027).index
-    df_sess2.loc[idx2, "ts"] = pd.Timestamp.utcnow() + pd.Timedelta(days=30)
+    df_sess2.loc[idx2, "ts"] = dt.datetime.utcnow() + dt.timedelta(days=30)
 
     # Orphan conversions: create fake session ids
     k3 = max(1, int(n_conv * frac))
@@ -297,34 +299,35 @@ dq_before = run_quality_checks(con_demo)
 dq_before
 
 # %%
-if os.getenv("OPENAI_API_KEY", "").strip():
-    result = run_agentic_cleaning_loop(
-        sessions=df_sess_demo,
-        conversions=df_conv_demo,
-        channels=df_chan,
-        planner_model="gpt-5.2-instant",
-        judge_model="gpt-5.2-thinking",
-        max_iters=2,
-    )
+if __name__ == "__main__":
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        result = run_agentic_cleaning_loop(
+            sessions=df_sess_demo,
+            conversions=df_conv_demo,
+            channels=df_chan,
+            planner_model="gpt-5.2-chat-latest",
+            judge_model="gpt-5.2",
+            max_iters=2,
+        )
 
-    print("AI plan:")
-    print(result["plan"])
-    print("AI judge verdict:")
-    print(result["judge"])
+        print("AI plan:")
+        print(result["plan"])
+        print("AI judge verdict:")
+        print(result["judge"])
 
-    # Use cleaned data going forward (optional)
-    df_sess_clean = result["sessions_clean"]
-    df_conv_clean = result["conversions_clean"]
+        # Use cleaned data going forward (optional)
+        df_sess_clean = result["sessions_clean"]
+        df_conv_clean = result["conversions_clean"]
 
-    con_clean = duckdb.connect(database=":memory:")
-    con_clean.register("raw_sessions", df_sess_clean)
-    con_clean.register("raw_conversions", df_conv_clean)
-    con_clean.register("dim_channels", df_chan)
+        con_clean = duckdb.connect(database=":memory:")
+        con_clean.register("raw_sessions", df_sess_clean)
+        con_clean.register("raw_conversions", df_conv_clean)
+        con_clean.register("dim_channels", df_chan)
 
-    print("Quality checks AFTER AI cleaning:")
-    run_quality_checks(con_clean)
-else:
-    print("OPENAI_API_KEY is not set. Skipping AI cleaning demo.")
+        print("Quality checks AFTER AI cleaning:")
+        run_quality_checks(con_clean)
+    else:
+        print("OPENAI_API_KEY is not set. Skipping AI cleaning demo.")
 
 
 # %% [markdown]

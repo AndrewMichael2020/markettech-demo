@@ -96,9 +96,10 @@ def inject_corruption(df_sess: pd.DataFrame, df_conv: pd.DataFrame, frac: float 
     idx = df_conv2.sample(k, random_state=2026).index
     df_conv2.loc[idx, "revenue"] = -df_conv2.loc[idx, "revenue"].abs()
 
+    # Future timestamps (sessions) - keep timezone-naive to avoid mixed dtypes
     k2 = max(1, int(n_sess * frac))
     idx2 = df_sess2.sample(k2, random_state=2027).index
-    df_sess2.loc[idx2, "ts"] = pd.Timestamp.utcnow() + pd.Timedelta(days=30)
+    df_sess2.loc[idx2, "ts"] = dt.datetime.utcnow() + dt.timedelta(days=30)
 
     k3 = max(1, int(n_conv * frac))
     idx3 = df_conv2.sample(k3, random_state=2028).index
@@ -160,44 +161,83 @@ def main() -> None:
         st.header("Controls")
         days = st.slider("Days of simulated history", min_value=14, max_value=120, value=60, step=7)
         window = st.slider("Attribution window (days)", min_value=1, max_value=30, value=7, step=1)
-        corrupt = st.toggle("Inject bad data (for demo)", value=False)
-        use_ai = st.toggle("Use AI cleaning agent", value=False)
+        inject_clicked = st.button("Inject bad data (for demo)")
+        ai_clicked = st.button("Use AI cleaning agent")
         st.caption("AI requires OPENAI_API_KEY on the server.")
 
+    # Session state for current engine data and AI results
+    if "engine_days" not in st.session_state:
+        st.session_state["engine_days"] = None
+        st.session_state["base_sess"] = None
+        st.session_state["base_conv"] = None
+        st.session_state["base_chan"] = None
+        st.session_state["df_sess"] = None
+        st.session_state["df_conv"] = None
+        st.session_state["df_chan"] = None
+        st.session_state["corrupt_applied"] = False
+        st.session_state["ai_result"] = None
 
-    df_sess, df_conv, df_chan = load_engine(days=days)
+    # If the days slider changes, reset the engine state
+    if st.session_state["engine_days"] != days:
+        base_sess, base_conv, base_chan = load_engine(days=days)
+        st.session_state["engine_days"] = days
+        st.session_state["base_sess"] = base_sess
+        st.session_state["base_conv"] = base_conv
+        st.session_state["base_chan"] = base_chan
+        st.session_state["df_sess"] = base_sess
+        st.session_state["df_conv"] = base_conv
+        st.session_state["df_chan"] = base_chan
+        st.session_state["corrupt_applied"] = False
+        st.session_state["ai_result"] = None
 
-    if corrupt:
-        df_sess, df_conv = inject_corruption(df_sess, df_conv)
+    # One-shot: inject bad data into the current base dataset
+    if inject_clicked:
+        base_sess = st.session_state["base_sess"]
+        base_conv = st.session_state["base_conv"]
+        if base_sess is not None and base_conv is not None:
+            sess_bad, conv_bad = inject_corruption(base_sess, base_conv)
+            st.session_state["df_sess"] = sess_bad
+            st.session_state["df_conv"] = conv_bad
+            st.session_state["corrupt_applied"] = True
+            st.session_state["ai_result"] = None
 
+    # Current working tables for this run
+    df_sess = st.session_state["df_sess"]
+    df_conv = st.session_state["df_conv"]
+    df_chan = st.session_state["df_chan"]
 
+    # Optional AI cleaning loop (one-shot button)
+    ai_result = st.session_state.get("ai_result")
+    if ai_clicked:
+        api_key_present = os.getenv("OPENAI_API_KEY", "").strip() != ""
+        if not api_key_present:
+            st.warning("OPENAI_API_KEY is not set on this server. AI cleaning is disabled.")
+        else:
+            try:
+                ai_result = run_agentic_cleaning_loop(
+                    sessions=df_sess,
+                    conversions=df_conv,
+                    channels=df_chan,
+                    planner_model="gpt-5.2-chat-latest",
+                    judge_model="gpt-5.2",
+                    max_iters=2,
+                )
+            except Exception as e:
+                # Surface a friendly error in the UI without breaking the whole app.
+                st.error(f"AI cleaning agent failed: {e}")
+                ai_result = None
+            else:
+                df_sess = ai_result["sessions_clean"]
+                df_conv = ai_result["conversions_clean"]
+                st.session_state["df_sess"] = df_sess
+                st.session_state["df_conv"] = df_conv
+                st.session_state["ai_result"] = ai_result
+
+    # Build a fresh DuckDB connection from the current working tables
     con = duckdb.connect(database=":memory:")
     con.register("raw_sessions", df_sess)
     con.register("raw_conversions", df_conv)
     con.register("dim_channels", df_chan)
-
-    # Optional AI cleaning loop
-    ai_result = None
-    if use_ai:
-        if os.getenv("OPENAI_API_KEY", "").strip():
-            ai_result = run_agentic_cleaning_loop(
-                sessions=df_sess,
-                conversions=df_conv,
-                channels=df_chan,
-                planner_model="gpt-5.2-instant",
-                judge_model="gpt-5.2-thinking",
-                max_iters=2,
-            )
-            df_sess = ai_result["sessions_clean"]
-            df_conv = ai_result["conversions_clean"]
-
-            # Re-register cleaned tables
-            con.unregister("raw_sessions")
-            con.unregister("raw_conversions")
-            con.register("raw_sessions", df_sess)
-            con.register("raw_conversions", df_conv)
-        else:
-            st.warning("OPENAI_API_KEY is not set on this server. AI cleaning is disabled.")
 
     build_semantic_view(con, window_days=window)
     df = channel_summary(con)
@@ -211,12 +251,43 @@ def main() -> None:
 
     if ai_result is not None:
         st.subheader("AI cleaning verdict")
-        st.json({
-            "checks_before": ai_result.get("checks_before"),
-            "checks_after": ai_result.get("checks_after"),
-            "plan": ai_result.get("plan"),
-            "judge": ai_result.get("judge"),
-        }, expanded=False)
+
+        checks_before = ai_result.get("checks_before", {}) or {}
+        checks_after = ai_result.get("checks_after", {}) or {}
+        plan = ai_result.get("plan", {}) or {}
+        judge = ai_result.get("judge", {}) or {}
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("**Quality checks (before → after)**")
+            rows = []
+            for key, before_val in checks_before.items():
+                after_val = checks_after.get(key, None)
+                rows.append({
+                    "check": key,
+                    "before": before_val,
+                    "after": after_val,
+                })
+            if rows:
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        with col_b:
+            st.markdown("**Cleaning steps proposed by AI**")
+            steps = plan.get("steps", []) or []
+            if steps:
+                step_rows = [
+                    {"step": i + 1, "op": s.get("op"), "args": str(s.get("args"))}
+                    for i, s in enumerate(steps)
+                ]
+                st.dataframe(pd.DataFrame(step_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("No cleaning steps were proposed.")
+
+        verdict = judge.get("verdict", "unknown")
+        st.markdown(f"**Judge verdict:** `{verdict}`")
+        if judge.get("reasons"):
+            with st.expander("Show judge reasoning"):
+                st.json(judge)
 
 
     st.subheader("Channel performance")
