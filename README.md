@@ -1,190 +1,293 @@
-# MarketTech: The Truth Engine
+## NorthPeak Retail / MarketTech demo
 
-Engineering data products for growth strategy, in 120 minutes.
+This repo contains a **teaching demo** for data analytics students.
 
-This workshop kit moves a mixed audience from an **Excel mindset** to a **systems engineering mindset** by showing the full lifecycle:
-Notebook (R&D) → App (Product) → Cloud Run (Deployment).
+You start with raw events (website sessions and purchases) and gradually turn
+them into a **trustworthy metric** behind a Streamlit app and a Cloud Run URL.
 
-## Badges
+You do **not** need to be a software engineer to use this. Most of the work is
+changing parameters, running notebooks, and reading charts.
 
-- CI: `https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/ci.yml`
-- Docker build: `https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/docker.yml`
+---
+
+## Status badges
+
+CI and Docker workflows run on GitHub Actions:
 
 ![CI](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/ci.yml/badge.svg)
 ![Docker build](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/docker.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 
-## What you will demo
-1. **Event stream ingestion** (sessions + purchases)
-2. **DuckDB “lakehouse”** (raw tables → SQL)
-3. **Metric contract** (semantic view with an attribution window)
-4. **Quality gates** (stop bad data from shipping)
-5. **Streamlit product** (the same engine behind a URL)
-6. **Optional AI loop** (AI cleaner proposes a plan, AI judge verifies)
+---
 
-## Repository structure
-- `markettech_workshop.py`  
-  Notebook-as-code with `# %%` cells (VS Code friendly)
-- `markettech_workshop.ipynb`  
-  Same content as a Jupyter notebook
+## What you will learn
+
+By working through this repo, students see the full story:
+
+1. **Event data → tables**  
+   Simulated sessions and purchases land in DuckDB as `raw_sessions` and
+   `raw_conversions`.
+2. **Metric contract**  
+   A SQL view (`f_attribution`) defines when a purchase “counts” as
+   attributed to a session (within N days).
+3. **Quality checks**  
+   Simple rules catch bad data (negative revenue, orphan conversions,
+   broken timestamps) before it ships.
+4. **Product surface**  
+   A Streamlit app (“NorthPeak Retail”) shows the same engine behind a URL
+   with sliders and charts.
+5. **Optional AI cleaner**  
+   An OpenAI-based “cleaning agent” proposes how to fix bad rows, and an
+   AI judge checks the result.
+
+The goal is to move from an **Excel mindset** (“numbers just appear”) to a
+**systems mindset** (“numbers come from code, contracts, and checks”).
+
+---
+
+## Repo overview (files you will touch)
+
+- `markettech_workshop.py` / `markettech_workshop.ipynb`  
+  The main workshop notebook (Python script + Jupyter notebook). You can run
+  either version.
 - `app.py`  
-  Streamlit app using the same generator + SQL engine
+  The Streamlit app (NorthPeak Retail). Uses the same data generator and SQL
+  contract as the notebook.
 - `ai_cleaning_agent.py`  
-  Optional: OpenAI planner + judge for cleaning, with deterministic execution
-- `tests/`  
-  Minimal tests that prove determinism + contract behavior
-- `.github/workflows/`  
-  CI workflow (pytest) and Docker build workflow
-- `terraform/`  
-  IaC for Artifact Registry + Cloud Run
-- `scripts/`  
-  Deploy, cleanup, and set-key helpers
+  Optional agentic loop: planner model, deterministic cleaning code,
+  and judge model.
+- `test_engine.py`  
+  A few small tests that prove:
+  - data generation is deterministic
+  - the metric contract behaves as described
+  - the AI cleaner only runs when a key is present.
+- `.github/workflows/ci.yml`  
+  CI pipeline: runs tests and, on `main`, builds and deploys to Cloud Run.
+- `docker.yml`  
+  GitHub Actions workflow that builds the Docker image (no push) for quick
+  feedback.
+- `Dockerfile`  
+  How the app is containerized for Cloud Run.
+- `main.tf`, `variables.tf`, `versions.tf`  
+  Terraform files that describe the Cloud Run service and Artifact Registry.
+- `deploy_cloud_run.sh`, `cleanup_cloud_run.sh`, `set_openai_key_cloud_run.sh`  
+  Helper scripts for instructors to deploy / tear down resources and configure
+  the OpenAI key in Secret Manager.
+
+You can safely ignore the Terraform and shell scripts if you are just a
+student following the workshop. An instructor or DevOps engineer will usually
+prepare the Cloud Run URL for you.
 
 ---
 
-# MarketTech Workshop Curriculum (Runbook)
+## Quickstart for students (local run)
 
-## Audience
-- Marketing and growth stakeholders: care about the decisions and the story
-- Technical stakeholders: care about logic, repeatability, and correctness
+### 1. Create and activate a virtual environment
 
-## Learning outcomes
-By the end, students can:
-- Explain why “dashboard truth” depends on definitions
-- Write a metric contract as SQL
-- Add quality gates that prevent shipping bad data
-- Wrap an analysis engine into a product endpoint
-- Describe an agentic loop: plan → execute → judge
+This keeps Python packages for the workshop separate from your system.
 
-## 120-minute flow (recommended timing)
-
-### 0–10 Setup and premise
-- Show two conflicting numbers for a key metric.
-- State the root cause: different definitions, hidden assumptions.
-- Show the Streamlit URL early. This is the “product.”
-
-### 10–35 Notebook: the raw reality
-- Generate deterministic session_start and purchase events.
-- Register them in DuckDB as `raw_sessions` and `raw_conversions`.
-- Show what makes event data “unfriendly” for dashboards.
-
-### 35–60 Notebook: the metric contract
-- Create `f_attribution` as the semantic view.
-- Contract: a purchase counts only if it occurs within **N days** of the session.
-- Run summary: naive vs trusted vs out-of-window.
-- Flip the attribution window (7 → 30 days). Re-run. Discuss how the “truth” changes.
-
-### 60–75 Notebook: quality gates
-- Run three assertions:
-  - negative revenue
-  - orphan conversions
-  - future timestamps
-- Message: if checks fail, we do not publish results.
-
-### 75–95 Product: Streamlit app
-- Open `app.py` and point to the same generator + SQL.
-- Use the slider to change the attribution window live.
-- Optional: toggle “Inject bad data” and show quality failing or shifting.
-
-### 95–115 Deployment: Cloud Run
-- Show Dockerfile: Streamlit bound to `$PORT`.
-- Show Terraform: Cloud Run service with public access and min instances 0.
-- If you want, run the deploy script once (manual).
-
-### 115–120 Close
-- One-line wrap: metrics are code, contracts are governance, products are URLs.
-
----
-
-## Local quickstart
-### 1) Create venv
 ```bash
 python -m venv .venv
+
 # Windows
 .venv\Scripts\activate
-# macOS/Linux
+
+# macOS / Linux
 source .venv/bin/activate
 ```
 
-### 2) Install deps
+### 2. Install dependencies
+
 ```bash
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
-### 3) Run tests
+### 3. Run the tests (optional but recommended)
+
 ```bash
 pytest -q
 ```
 
-### 4) Run the Streamlit app
+If this passes, your environment matches the expected behavior.
+
+### 4. Start the Streamlit app
+
 ```bash
 streamlit run app.py
 ```
 
----
+Your browser should open at `http://localhost:8501` (or Streamlit will show
+you the exact URL). This is the **NorthPeak Retail** app.
 
-## Optional: AI cleaning agent + AI judge
-This shows a minimal agentic loop:
-- planner model proposes a constrained cleaning plan (JSON)
-- your code executes it deterministically in DuckDB
-- judge model returns PASS or FAIL
+What to try in the app:
 
-Set:
-```bash
-export OPENAI_API_KEY="YOUR_KEY"
-```
-
-Then:
-- In the notebook, run “Phase 5A”
-- In the app, toggle “Use AI cleaning agent”
+- Change the **History window (days)** to see how much raw data you replay.
+- Change the **Attribution contract window (days)** to see how the metric
+  definition changes conversions.
+- Turn on **Inject demo anomalies** to introduce a small amount of bad data.
+- (If enabled) click **Run AI cleaner + judge** to see an AI plan and verdict.
 
 ---
 
-## Cloud Run deploy (low cost, scales down when idle)
-### Required tools
-- `gcloud`
-- `terraform`
+## Optional: AI cleaning agent and AI judge
 
-### Deploy
+If you want to explore the AI part, you need an OpenAI API key. **Never
+commit this key to Git or share it in screenshots.**
+
+### 1. Set your key in the terminal
+
 ```bash
-export PROJECT_ID="your-project-id"
-export REGION="us-central1"
-export REPO="markettech"
-export SERVICE="markettech-truth-engine"
-export TAG="v1"
-
-# build + push image via Cloud Build, then apply Terraform
-./scripts/deploy_cloud_run.sh
+export OPENAI_API_KEY="YOUR_REAL_KEY_HERE"
 ```
 
-### Set OpenAI key on Cloud Run (server-side)
-```bash
-export OPENAI_API_KEY="YOUR_KEY"
-./scripts/set_openai_key_cloud_run.sh
+On Windows PowerShell, use:
+
+```powershell
+$env:OPENAI_API_KEY = "YOUR_REAL_KEY_HERE"
 ```
+
+### 2. Use the AI cleaner
+
+- In the notebook (`markettech_workshop.py` / `.ipynb`), find the AI cleaning
+  phase and run those cells.
+- In the Streamlit app, turn on **Run AI cleaner + judge** in the sidebar.
+
+Behind the scenes:
+
+- The **planner model** suggests a small set of allowed operations
+  (e.g. “drop rows with negative revenue”).
+- Your Python code applies those steps deterministically using DuckDB.
+- The **judge model** checks before/after quality checks and decides
+  whether the cleaning is acceptable.
+
+If `OPENAI_API_KEY` is not set, the app will simply skip the AI part and
+explain that AI is optional.
 
 ---
 
-## Stop costs fast
-### Option A: destroy Terraform resources
-```bash
-export PROJECT_ID="your-project-id"
-./scripts/cleanup_cloud_run.sh
-```
+## 120‑minute teaching flow (for instructors)
 
-### Option B: delete the entire project (one action)
-```bash
-gcloud projects delete "${PROJECT_ID}"
-```
+This is a suggested lesson plan if you are teaching this workshop.
+
+### 0–10: Setup and premise
+
+- Show two conflicting numbers for “conversions” from different dashboards.
+- Explain that both are “correct” for their own definition, but confusing
+  together.
+- Open the Streamlit app URL (local or Cloud Run). This is the **product**
+  students are trying to understand.
+
+### 10–35: Notebook – the raw reality
+
+- Generate deterministic `session_start` and `purchase` events.
+- Register them as `raw_sessions` and `raw_conversions` in DuckDB.
+- Discuss why event data is messy for business users (multiple timestamps,
+  missing links, strange edge cases).
+
+### 35–60: Notebook – the metric contract
+
+- Build `f_attribution` as a semantic view on top of the raw tables.
+- Define the contract: a purchase only counts if it happens within **N days**
+  of a session.
+- Compare:
+  - naive conversions (every purchase)
+  - trusted conversions (within the contract window)
+  - out-of-window conversions.
+- Flip the window from 7 → 30 days and see how “truth” changes.
+
+### 60–75: Notebook – quality gates
+
+- Add and run simple checks:
+  - negative revenue
+  - orphan conversions (no matching session)
+  - invalid or future timestamps.
+- Message: if checks fail, we don’t ship the metric.
+
+### 75–95: Product – Streamlit app
+
+- Open `app.py` and point out it uses the same generator and SQL view.
+- Use the filters to change the attribution window and history window live.
+- Toggle “Inject demo anomalies” and watch quality metrics react.
+
+### 95–115: (Optional) AI loop and/or Cloud Run
+
+- Show how the AI cleaner proposes a plan and how the judge reviews it.
+- Briefly show the Dockerfile and explain that Cloud Run just wraps this
+  app in a container behind a URL.
+
+### 115–120: Close
+
+- One-line summary: **Metrics are code, contracts are governance, and
+  products are URLs.**
 
 ---
 
-## CI and best practice defaults
-This repo includes:
-- `CI` workflow that runs pytest on push/PR
-- `Docker build` workflow that builds the container on push/PR (no push by default)
+## Cloud Run and CI/CD (for instructors / DevOps)
 
-To show CI in the workshop:
-- open the Actions tab
-- show a green run from a small change (README or comment) plus tests
+You do **not** need this section to learn analytics concepts. This is for
+people setting up the hosted version of the app.
+
+### Overview
+
+- Terraform files (`main.tf`, `variables.tf`, `versions.tf`) describe:
+  - enabling required Google Cloud APIs
+  - an Artifact Registry repository
+  - a Cloud Run service.
+- GitHub Actions workflow `.github/workflows/ci.yml`:
+  - runs tests on every push / PR
+  - on `main`, builds the Docker image with Cloud Build
+  - deploys to Cloud Run using Workload Identity Federation.
+- The OpenAI key is stored **only** in Google Secret Manager as
+  `openai-api-key`. Cloud Run reads it via `OPENAI_API_KEY` using
+  `--update-secrets`. The key never appears in GitHub logs.
+
+### High‑level deployment steps
+
+1. **In Google Cloud**
+   - Create or choose a project (e.g. `studio-1697788595-a34f5`).
+   - Enable Artifact Registry, Cloud Run, and Cloud Build.
+   - Create a Docker repo (e.g. `markettech` in `us-central1`).
+   - Create a Secret Manager secret `openai-api-key` and add your key as
+     version 1.
+   - Grant the Cloud Run service account `roles/secretmanager.secretAccessor`.
+
+2. **Set up Workload Identity Federation (once)**
+   - Create a Workload Identity Pool and OIDC provider for GitHub Actions.
+   - Allow that pool to impersonate a deployer service account
+     (e.g. `github-actions-deployer@...`).
+
+3. **In GitHub repo settings**
+   - Add repository **secrets/variables** for:
+     - `GCP_PROJECT_ID`, `GCP_REGION`, `CLOUD_RUN_SERVICE`, `ARTIFACT_REPO`
+     - `GCP_SERVICE_ACCOUNT`, `WORKLOAD_IDENTITY_PROVIDER`.
+
+4. **Let Actions do the rest**
+   - On push to `main`, `.github/workflows/ci.yml` will:
+     - authenticate to GCP via OIDC (no long-lived keys)
+     - run tests
+     - build and push the image
+     - deploy to Cloud Run with `OPENAI_API_KEY` wired from Secret Manager.
+
+If you prefer a one-off manual deploy instead of CI/CD, you can still use
+`deploy_cloud_run.sh`, `cleanup_cloud_run.sh`, and `set_openai_key_cloud_run.sh`
+from Cloud Shell, but the recommended path is the GitHub Actions pipeline.
+
+---
+
+## CI: how to show it in class
+
+To demo “tests as a safety net” to students:
+
+- Make a tiny, harmless change (for example, edit a sentence in this README).
+- Push to a branch and open a pull request, or push directly to `main` if
+  working alone.
+- Open the **Actions** tab and show:
+  - the `CI` workflow running tests
+  - the `Docker build` workflow building the image.
+
+This reinforces that:
+
+- metric logic is tested,
+- deployments are automated,
+- and no one is manually copying files to servers.
