@@ -5,3 +5,4 @@ matplotlib==3.9.2
 streamlit==1.39.0
 jupyter==1.1.1
 openai>=1.0.0
+requests>=2.31.0

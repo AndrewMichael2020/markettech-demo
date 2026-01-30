@@ -1,5 +1,20 @@
 ## NorthPeak Retail / MarketTech demo
 
+![CI](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/ci.yml/badge.svg)
+![Docker build](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/docker.yml/badge.svg)
+![Tests](https://img.shields.io/github/actions/workflow/status/AndrewMichael2020/markettech-demo/ci.yml?label=tests&logo=github)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+
+![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white)
+![Streamlit](https://img.shields.io/badge/App-Streamlit-ff4b4b?logo=streamlit&logoColor=white)
+![DuckDB](https://img.shields.io/badge/Warehouse-DuckDB-yellow?logo=duckdb&logoColor=white)
+![Jupyter](https://img.shields.io/badge/Notebook-Jupyter-F37626?logo=jupyter&logoColor=white)
+![OpenAI](https://img.shields.io/badge/AI-OpenAI-412991?logo=openai&logoColor=white)
+
+![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+
+---
+
 This repo contains a **teaching demo** for data analytics students. It was developed with assistance from ChatGPT, GitHub Copilot, GitHub Workspaces, GitHub Actions, Google Cloud Run, and Google Cloud Build. 
 
 You start with raw events (website sessions and purchases) and gradually turn
@@ -15,29 +30,6 @@ With a bit of Python and SQL, you can build your own small but robust
 analytics products: local apps, hosted apps, and even CI/CD pipelines with
 role-based access and AI assistance – all using the same core ideas you
 already know from analytics work.
-
----
-
-## Status badges
-
-CI / Docker / quality:
-
-![CI](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/ci.yml/badge.svg)
-![Docker build](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/docker.yml/badge.svg)
-![Tests](https://img.shields.io/github/actions/workflow/status/AndrewMichael2020/markettech-demo/ci.yml?label=tests&logo=github)
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
-
-Tech stack:
-
-![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white)
-![Streamlit](https://img.shields.io/badge/App-Streamlit-ff4b4b?logo=streamlit&logoColor=white)
-![DuckDB](https://img.shields.io/badge/Warehouse-DuckDB-yellow?logo=duckdb&logoColor=white)
-![Jupyter](https://img.shields.io/badge/Notebook-Jupyter-F37626?logo=jupyter&logoColor=white)
-![OpenAI](https://img.shields.io/badge/AI-OpenAI-412991?logo=openai&logoColor=white)
-
-Collaboration:
-
-![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
 
 ---
 
@@ -58,11 +50,68 @@ By working through this repo, students see the full story:
    A Streamlit app (“NorthPeak Retail”) shows the same engine behind a URL
    with sliders and charts.
 5. **Optional AI cleaner**  
-   An OpenAI-based “cleaning agent” proposes how to fix bad rows, and an
-   AI judge checks the result.
+   An AI "cleaning agent" (OpenAI or a local Gemma model) proposes how to
+   fix bad rows, and an AI judge checks the result.
 
 The goal is to move from an **Excel mindset** (“numbers just appear”) to a
 **systems mindset** (“numbers come from code, contracts, and checks”).
+
+---
+
+## 120‑minute teaching flow (for instructors)
+
+This is a suggested lesson plan if you are teaching this workshop.
+
+### 0–10: Setup and premise
+
+- Show two conflicting numbers for “conversions” from different dashboards.
+- Explain that both are “correct” for their own definition, but confusing
+  together.
+- Open the Streamlit app URL (local or Cloud Run). This is the **product**
+  students are trying to understand.
+
+### 10–35: Notebook – the raw reality
+
+- Generate deterministic `session_start` and `purchase` events.
+- Register them as `raw_sessions` and `raw_conversions` in DuckDB.
+- Discuss why event data is messy for business users (multiple timestamps,
+  missing links, strange edge cases).
+
+### 35–60: Notebook – the metric contract
+
+- Build `f_attribution` as a semantic view on top of the raw tables.
+- Define the contract: a purchase only counts if it happens within **N days**
+  of a session.
+- Compare:
+  - naive conversions (every purchase)
+  - trusted conversions (within the contract window)
+  - out-of-window conversions.
+- Flip the window from 7 → 30 days and see how “truth” changes.
+
+### 60–75: Notebook – quality gates
+
+- Add and run simple checks:
+  - negative revenue
+  - orphan conversions (no matching session)
+  - invalid or future timestamps.
+- Message: if checks fail, we don’t ship the metric.
+
+### 75–95: Product – Streamlit app
+
+- Open `app.py` and point out it uses the same generator and SQL view.
+- Use the filters to change the attribution window and history window live.
+- Toggle “Inject demo anomalies” and watch quality metrics react.
+
+### 95–115: (Optional) AI loop and/or Cloud Run
+
+- Show how the AI cleaner proposes a plan and how the judge reviews it.
+- Briefly show the Dockerfile and explain that Cloud Run just wraps this
+  app in a container behind a URL.
+
+### 115–120: Close
+
+- One-line summary: **Metrics are code, contracts are governance, and
+  products are URLs.**
 
 ---
 
@@ -153,26 +202,33 @@ What to try in the app:
 
 ## Optional: AI cleaning agent and AI judge
 
-If you want to explore the AI part, you need an OpenAI API key. **Never
-commit this key to Git or share it in screenshots.**
+There are two ways to run the AI cleaning loop:
 
-### 1. Set your key in the terminal
+1. **OpenAI-hosted models** (default, requires an OpenAI API key)
+2. **Local Gemma llamafile** from Mozilla AI (runs fully in this Codespace)
 
-```bash
-export OPENAI_API_KEY="YOUR_REAL_KEY_HERE"
-```
+### Option A: OpenAI
 
-On Windows PowerShell, use:
+If you want to explore the OpenAI-based AI cleaner, you need an OpenAI API
+key. **Never commit this key to Git or share it in screenshots.**
 
-```powershell
-$env:OPENAI_API_KEY = "YOUR_REAL_KEY_HERE"
-```
+1. Set your key in the terminal:
 
-### 2. Use the AI cleaner
+   ```bash
+   export OPENAI_API_KEY="YOUR_REAL_KEY_HERE"
+   ```
 
-- In the notebook (`markettech_workshop.py` / `.ipynb`), find the AI cleaning
-  phase and run those cells.
-- In the Streamlit app, turn on **Run AI cleaner + judge** in the sidebar.
+   On Windows PowerShell:
+
+   ```powershell
+   $env:OPENAI_API_KEY = "YOUR_REAL_KEY_HERE"
+   ```
+
+2. Use the AI cleaner:
+
+   - In the notebook (`markettech_workshop.py` / `.ipynb`), find the AI cleaning
+     phase and run those cells.
+   - In the Streamlit app, turn on **Run AI cleaner + judge** in the sidebar.
 
 Behind the scenes:
 
@@ -182,77 +238,118 @@ Behind the scenes:
 - The **judge model** checks before/after quality checks and decides
   whether the cleaning is acceptable.
 
-If `OPENAI_API_KEY` is not set, the app will simply skip the AI part and
-explain that AI is optional.
+If `OPENAI_API_KEY` is not set (and no local Gemma server is configured),
+the app will simply skip the AI part and explain that AI is optional.
+
+### Option B: Local Gemma llamafile (no external API calls)
+
+You can also run the AI cleaning loop entirely locally using the
+`google_gemma-3-4b-it-Q6_K.llamafile` from Mozilla AI.
+
+1. **Download the Gemma llamafile** (once):
+
+   ```bash
+   chmod +x download_gemma_llamafile.sh
+   ./download_gemma_llamafile.sh
+   ```
+
+   This fetches the llamafile into the repo and marks it executable.
+
+2. **Start the local Gemma HTTP server** in a terminal:
+
+   ```bash
+   chmod +x run_gemma_llamafile.sh
+   ./run_gemma_llamafile.sh
+   ```
+
+   By default this starts an OpenAI-compatible server at
+   `http://127.0.0.1:8080/v1`. You can make that explicit for the Python
+   code via:
+
+   ```bash
+   export GEMMA_API_BASE=http://127.0.0.1:8080/v1
+   ```
+
+3. **Use the Gemma-based cleaning agent**:
+
+   - In the notebook / script, the helper `_run_ai_demo` in
+     `markettech_workshop.py` will automatically prefer the Gemma-based
+     agent when `GEMMA_API_BASE` is set.
+   - Programmatically, you can call the local agent directly:
+
+     ```python
+     import datetime as dt
+     from markettech_workshop import generate_stream, inject_corruption
+     from gemma_cleaning_agent import run_agentic_cleaning_loop_gemma
+
+     df_sess, df_conv, df_chan = generate_stream(days=14, start_date=dt.date(2025, 9, 1))
+     df_sess_bad, df_conv_bad = inject_corruption(df_sess, df_conv)
+
+     result = run_agentic_cleaning_loop_gemma(
+         sessions=df_sess_bad,
+         conversions=df_conv_bad,
+         channels=df_chan,
+         max_iters=2,
+     )
+
+     print(result["plan"])
+     print(result["judge"])
+     ```
+
+The `gemma_cleaning_agent.py` module mirrors the behavior of
+`ai_cleaning_agent.py` but talks to the local llamafile via an
+OpenAI-style `/v1/chat/completions` HTTP endpoint instead of the
+hosted OpenAI API.
+
+### Why local models matter (privacy & sovereignty)
+
+Running the Gemma 4B llamafile entirely inside a GitHub Codespace (or on
+your own machine) means:
+
+- **No event data leaves your environment for AI planning/judging.** You can
+  experiment with agentic data cleaning without sending payloads to a third
+  party API.
+- You practice thinking about **data residency and governance**: which
+  workloads are safe to push to external services, and which should stay
+  close to the data.
+- In classroom or corporate settings where external AI services are
+  restricted, you can still use this workshop with a fully local model.
+
+For teaching purposes, you can frame the choice of backend (OpenAI vs local
+Gemma) as part of the architectural trade‑offs students should learn to
+reason about: latency and model quality vs. control and privacy.
 
 ---
 
-## 120‑minute teaching flow (for instructors)
+## Beyond this workshop
 
-This is a suggested lesson plan if you are teaching this workshop.
+After you finish the exercises, it is worth stepping back and noticing what
+you have actually done:
 
-### 0–10: Setup and premise
+- You started from raw event data and used SQL to define a clear, repeatable
+  metric contract.
+- You added simple but powerful quality checks so that silent data problems
+  do not turn into silent business problems.
+- You wrapped that logic in a real app (Streamlit) that non-technical
+  stakeholders can use.
+- You saw that the same app can run locally on your laptop or behind a
+  Cloud Run URL.
 
-- Show two conflicting numbers for “conversions” from different dashboards.
-- Explain that both are “correct” for their own definition, but confusing
-  together.
-- Open the Streamlit app URL (local or Cloud Run). This is the **product**
-  students are trying to understand.
+In production teams, people layer on more engineering practices (CI/CD,
+RBAC, multiple databases, etc.), but the **core ideas do not change**:
 
-### 10–35: Notebook – the raw reality
+- metrics are defined in code,
+- contracts and checks protect “truth”,
+- and products are just user-friendly ways to surface that logic.
 
-- Generate deterministic `session_start` and `purchase` events.
-- Register them as `raw_sessions` and `raw_conversions` in DuckDB.
-- Discuss why event data is messy for business users (multiple timestamps,
-  missing links, strange edge cases).
-
-### 35–60: Notebook – the metric contract
-
-- Build `f_attribution` as a semantic view on top of the raw tables.
-- Define the contract: a purchase only counts if it happens within **N days**
-  of a session.
-- Compare:
-  - naive conversions (every purchase)
-  - trusted conversions (within the contract window)
-  - out-of-window conversions.
-- Flip the window from 7 → 30 days and see how “truth” changes.
-
-### 60–75: Notebook – quality gates
-
-- Add and run simple checks:
-  - negative revenue
-  - orphan conversions (no matching session)
-  - invalid or future timestamps.
-- Message: if checks fail, we don’t ship the metric.
-
-### 75–95: Product – Streamlit app
-
-- Open `app.py` and point out it uses the same generator and SQL view.
-- Use the filters to change the attribution window and history window live.
-- Toggle “Inject demo anomalies” and watch quality metrics react.
-
-### 95–115: (Optional) AI loop and/or Cloud Run
-
-- Show how the AI cleaner proposes a plan and how the judge reviews it.
-- Briefly show the Dockerfile and explain that Cloud Run just wraps this
-  app in a container behind a URL.
-
-### 115–120: Close
-
-- One-line summary: **Metrics are code, contracts are governance, and
-  products are URLs.**
+The point is not to turn every analyst into a platform engineer. The point is
+to show that you can participate in building robust analytics systems, not
+just consume dashboards, and that the tools you already know (SQL, basic
+Python) scale surprisingly far.
 
 ---
 
-The App
-
-<img width="1863" height="857" alt="Screenshot 2026-01-29 011458" src="https://github.com/user-attachments/assets/87a37cba-83ea-422c-80a6-fd56402bdbdb" />
-<img width="1887" height="937" alt="Screenshot 2026-01-29 011517" src="https://github.com/user-attachments/assets/ee2750d5-2c67-452a-9b01-dc02e8e21cc7" />
-<img width="1860" height="949" alt="Screenshot 2026-01-29 023404" src="https://github.com/user-attachments/assets/db99308f-0146-4045-adfe-aa2eae6215a4" />
-
----
-
-## Cloud Run and CI/CD (for instructors / DevOps)
+## Appendix A: Cloud Run and CI/CD (for instructors / DevOps)
 
 You do **not** need this section to learn analytics concepts. This is for
 people setting up the hosted version of the app.
@@ -315,7 +412,7 @@ If you prefer a one-off manual deploy instead of CI/CD, you can still use
 `deploy_cloud_run.sh`, `cleanup_cloud_run.sh`, and `set_openai_key_cloud_run.sh`
 from Cloud Shell, but the recommended path is the GitHub Actions pipeline.
 
-### Teardown / cleanup (for instructors)
+## Appendix B: Teardown / cleanup (for instructors)
 
 When you are done with the workshop environment, you can clean up GCP
 resources from Cloud Shell:
@@ -324,43 +421,13 @@ resources from Cloud Shell:
 # Delete the Cloud Run service (replace with your actual service name if different)
 gcloud run services delete markettech-truth-engine \
   --region=us-central1 \
-  --project=YOUR_PROJECT_ID \
   --quiet
 
 # Delete the Artifact Registry repo used by this demo (irreversible)
 gcloud artifacts repositories delete markettech \
   --location=us-central1 \
-  --project=YOUR_PROJECT_ID \
   --quiet
 
 # (Optional) Delete the OpenAI API key from Secret Manager
 gcloud secrets delete openai-api-key --quiet
 ```
-
----
-
-## Beyond this workshop
-
-After you finish the exercises, it is worth stepping back and noticing what
-you have actually done:
-
-- You started from raw event data and used SQL to define a clear, repeatable
-  metric contract.
-- You added simple but powerful quality checks so that silent data problems
-  do not turn into silent business problems.
-- You wrapped that logic in a real app (Streamlit) that non-technical
-  stakeholders can use.
-- You saw that the same app can run locally on your laptop or behind a
-  Cloud Run URL.
-
-In production teams, people layer on more engineering practices (CI/CD,
-RBAC, multiple databases, etc.), but the **core ideas do not change**:
-
-- metrics are defined in code,
-- contracts and checks protect “truth”,
-- and products are just user-friendly ways to surface that logic.
-
-The point is not to turn every analyst into a platform engineer. The point is
-to show that you can participate in building robust analytics systems, not
-just consume dashboards, and that the tools you already know (SQL, basic
-Python) scale surprisingly far.

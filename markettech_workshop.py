@@ -259,6 +259,7 @@ def run_quality_checks(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
 # %%
 import os
 from ai_cleaning_agent import run_agentic_cleaning_loop
+from gemma_cleaning_agent import run_agentic_cleaning_loop_gemma
 
 def inject_corruption(df_sess: pd.DataFrame, df_conv: pd.DataFrame, frac: float = 0.003) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -301,7 +302,10 @@ def inject_corruption(df_sess: pd.DataFrame, df_conv: pd.DataFrame, frac: float 
 
 
 def _run_ai_demo(df_sess: pd.DataFrame, df_conv: pd.DataFrame, df_chan: pd.DataFrame) -> None:
-    """Run the optional AI cleaning demo on a (possibly) corrupted dataset."""
+    """Run the optional AI cleaning demo on a (possibly) corrupted dataset.
+
+    Prefers local Gemma llamafile if GEMMA_API_BASE is set; otherwise uses OpenAI.
+    """
     df_sess_demo, df_conv_demo = inject_corruption(df_sess, df_conv)
 
     con_demo = duckdb.connect(database=":memory:")
@@ -313,7 +317,19 @@ def _run_ai_demo(df_sess: pd.DataFrame, df_conv: pd.DataFrame, df_chan: pd.DataF
     dq_before = run_quality_checks(con_demo)
     print(dq_before)
 
-    if os.getenv("OPENAI_API_KEY", "").strip():
+    gemma_base = os.getenv("GEMMA_API_BASE", "").strip()
+    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+
+    if gemma_base:
+        print(f"Using local Gemma llamafile at {gemma_base} for cleaning demo...")
+        result = run_agentic_cleaning_loop_gemma(
+            sessions=df_sess_demo,
+            conversions=df_conv_demo,
+            channels=df_chan,
+            max_iters=2,
+        )
+    elif openai_key:
+        print("Using OpenAI-based cleaning agent for demo...")
         result = run_agentic_cleaning_loop(
             sessions=df_sess_demo,
             conversions=df_conv_demo,
@@ -322,24 +338,25 @@ def _run_ai_demo(df_sess: pd.DataFrame, df_conv: pd.DataFrame, df_chan: pd.DataF
             judge_model="gpt-5.2",
             max_iters=2,
         )
-
-        print("AI plan:")
-        print(result["plan"])
-        print("AI judge verdict:")
-        print(result["judge"])
-
-        df_sess_clean = result["sessions_clean"]
-        df_conv_clean = result["conversions_clean"]
-
-        con_clean = duckdb.connect(database=":memory:")
-        con_clean.register("raw_sessions", df_sess_clean)
-        con_clean.register("raw_conversions", df_conv_clean)
-        con_clean.register("dim_channels", df_chan)
-
-        print("Quality checks AFTER AI cleaning:")
-        print(run_quality_checks(con_clean))
     else:
-        print("OPENAI_API_KEY is not set. Skipping AI cleaning demo.")
+        print("Neither GEMMA_API_BASE nor OPENAI_API_KEY is set. Skipping AI cleaning demo.")
+        return
+
+    print("AI plan:")
+    print(result["plan"])
+    print("AI judge verdict:")
+    print(result["judge"])
+
+    df_sess_clean = result["sessions_clean"]
+    df_conv_clean = result["conversions_clean"]
+
+    con_clean = duckdb.connect(database=":memory:")
+    con_clean.register("raw_sessions", df_sess_clean)
+    con_clean.register("raw_conversions", df_conv_clean)
+    con_clean.register("dim_channels", df_chan)
+
+    print("Quality checks AFTER AI cleaning:")
+    print(run_quality_checks(con_clean))
 
 
 def _plot_weekly_trend(con: duckdb.DuckDBPyConnection) -> None:

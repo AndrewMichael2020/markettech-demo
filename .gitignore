@@ -41,6 +41,9 @@ terraform/.terraform.lock.hcl
 # Docker
 **/.dockerignore
 
+# OSS models
+*.llamafile
+
 # Secrets
 .env
 .env.*
