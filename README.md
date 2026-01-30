@@ -1,18 +1,5 @@
 ## NorthPeak Retail / MarketTech demo
 
-![CI](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/ci.yml/badge.svg)
-![Docker build](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/docker.yml/badge.svg)
-![Tests](https://img.shields.io/github/actions/workflow/status/AndrewMichael2020/markettech-demo/ci.yml?label=tests&logo=github)
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
-
-![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white)
-![Streamlit](https://img.shields.io/badge/App-Streamlit-ff4b4b?logo=streamlit&logoColor=white)
-![DuckDB](https://img.shields.io/badge/Warehouse-DuckDB-yellow?logo=duckdb&logoColor=white)
-![Jupyter](https://img.shields.io/badge/Notebook-Jupyter-F37626?logo=jupyter&logoColor=white)
-![OpenAI](https://img.shields.io/badge/AI-OpenAI-412991?logo=openai&logoColor=white)
-
-![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
-
 ---
 
 This repo contains a **teaching demo** for data analytics students. It was developed with assistance from ChatGPT, GitHub Copilot, GitHub Workspaces, GitHub Actions, Google Cloud Run, and Google Cloud Build. 
@@ -30,6 +17,19 @@ With a bit of Python and SQL, you can build your own small but robust
 analytics products: local apps, hosted apps, and even CI/CD pipelines with
 role-based access and AI assistance – all using the same core ideas you
 already know from analytics work.
+
+---
+
+![CI](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/ci.yml/badge.svg)
+![Docker build](https://github.com/AndrewMichael2020/markettech-demo/actions/workflows/docker.yml/badge.svg)
+![Tests](https://img.shields.io/github/actions/workflow/status/AndrewMichael2020/markettech-demo/ci.yml?label=tests&logo=github)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white)
+![Streamlit](https://img.shields.io/badge/App-Streamlit-ff4b4b?logo=streamlit&logoColor=white)
+![DuckDB](https://img.shields.io/badge/Warehouse-DuckDB-yellow?logo=duckdb&logoColor=white)
+![Jupyter](https://img.shields.io/badge/Notebook-Jupyter-F37626?logo=jupyter&logoColor=white)
+![OpenAI](https://img.shields.io/badge/AI-OpenAI-412991?logo=openai&logoColor=white)
+![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
 
 ---
 
@@ -58,9 +58,9 @@ The goal is to move from an **Excel mindset** (“numbers just appear”) to a
 
 ---
 
-## 120‑minute teaching flow (for instructors)
+## 60‑minute teaching flow (for instructors)
 
-This is a suggested lesson plan if you are teaching this workshop.
+This is a suggested 1‑hour lesson plan if you are teaching this workshop.
 
 ### 0–10: Setup and premise
 
@@ -70,14 +70,20 @@ This is a suggested lesson plan if you are teaching this workshop.
 - Open the Streamlit app URL (local or Cloud Run). This is the **product**
   students are trying to understand.
 
-### 10–35: Notebook – the raw reality
+**Q&A (2–3 minutes):**  
+Ask: “Where have you seen ‘dueling dashboards’ in real life?”
+
+### 10–25: Notebook – the raw reality
 
 - Generate deterministic `session_start` and `purchase` events.
 - Register them as `raw_sessions` and `raw_conversions` in DuckDB.
 - Discuss why event data is messy for business users (multiple timestamps,
   missing links, strange edge cases).
 
-### 35–60: Notebook – the metric contract
+**Q&A (3–5 minutes):**  
+Ask: “Which of these raw columns would you *not* show directly to a VP, and why?”
+
+### 25–40: Notebook – the metric contract
 
 - Build `f_attribution` as a semantic view on top of the raw tables.
 - Define the contract: a purchase only counts if it happens within **N days**
@@ -88,30 +94,39 @@ This is a suggested lesson plan if you are teaching this workshop.
   - out-of-window conversions.
 - Flip the window from 7 → 30 days and see how “truth” changes.
 
-### 60–75: Notebook – quality gates
+**Q&A (3–5 minutes):**  
+Ask: “If Finance and Marketing disagree, which ‘truth’ should win—and who decides?”
+
+### 40–50: Quality gates and product surface
 
 - Add and run simple checks:
   - negative revenue
   - orphan conversions (no matching session)
   - invalid or future timestamps.
 - Message: if checks fail, we don’t ship the metric.
-
-### 75–95: Product – Streamlit app
-
 - Open `app.py` and point out it uses the same generator and SQL view.
-- Use the filters to change the attribution window and history window live.
-- Toggle “Inject demo anomalies” and watch quality metrics react.
+- In the Streamlit app, change:
+  - **History window (days)**
+  - **Attribution window (days)**
+  - Toggle “Inject demo anomalies” and watch quality metrics react.
 
-### 95–115: (Optional) AI loop and/or Cloud Run
+**Q&A (3–5 minutes):**  
+Ask: “Which check would you add next for your own company’s data?”
 
-- Show how the AI cleaner proposes a plan and how the judge reviews it.
-- Briefly show the Dockerfile and explain that Cloud Run just wraps this
-  app in a container behind a URL.
+### 50–60: Optional AI + wrap‑up
 
-### 115–120: Close
+- Briefly show that the AI cleaner (OpenAI or local Gemma) proposes a plan
+  and that a judge reviews it.
+- Emphasize that the AI is constrained by **your** contract and quality rules.
+- Connect to real teams: how this pattern maps to BI tools, data platforms,
+  and ML systems students might see on co‑op.
+
+**Final close (2–3 minutes):**
 
 - One-line summary: **Metrics are code, contracts are governance, and
   products are URLs.**
+- Invite questions about how they might adapt this pattern to their own
+  internships or projects.
 
 ---
 
@@ -321,34 +336,6 @@ reason about: latency and model quality vs. control and privacy.
 
 ---
 
-## Beyond this workshop
-
-After you finish the exercises, it is worth stepping back and noticing what
-you have actually done:
-
-- You started from raw event data and used SQL to define a clear, repeatable
-  metric contract.
-- You added simple but powerful quality checks so that silent data problems
-  do not turn into silent business problems.
-- You wrapped that logic in a real app (Streamlit) that non-technical
-  stakeholders can use.
-- You saw that the same app can run locally on your laptop or behind a
-  Cloud Run URL.
-
-In production teams, people layer on more engineering practices (CI/CD,
-RBAC, multiple databases, etc.), but the **core ideas do not change**:
-
-- metrics are defined in code,
-- contracts and checks protect “truth”,
-- and products are just user-friendly ways to surface that logic.
-
-The point is not to turn every analyst into a platform engineer. The point is
-to show that you can participate in building robust analytics systems, not
-just consume dashboards, and that the tools you already know (SQL, basic
-Python) scale surprisingly far.
-
----
-
 ## Appendix A: Cloud Run and CI/CD (for instructors / DevOps)
 
 You do **not** need this section to learn analytics concepts. This is for
@@ -431,3 +418,31 @@ gcloud artifacts repositories delete markettech \
 # (Optional) Delete the OpenAI API key from Secret Manager
 gcloud secrets delete openai-api-key --quiet
 ```
+
+---
+
+## Beyond this workshop
+
+After you finish the exercises, it is worth stepping back and noticing what
+you have actually done:
+
+- You started from raw event data and used SQL to define a clear, repeatable
+  metric contract.
+- You added simple but powerful quality checks so that silent data problems
+  do not turn into silent business problems.
+- You wrapped that logic in a real app (Streamlit) that non-technical
+  stakeholders can use.
+- You saw that the same app can run locally on your laptop or behind a
+  Cloud Run URL.
+
+In production teams, people layer on more engineering practices (CI/CD,
+RBAC, multiple databases, etc.), but the **core ideas do not change**:
+
+- metrics are defined in code,
+- contracts and checks protect “truth”,
+- and products are just user-friendly ways to surface that logic.
+
+The point is not to turn every analyst into a platform engineer. The point is
+to show that you can participate in building robust analytics systems, not
+just consume dashboards, and that the tools you already know (SQL, basic
+Python) scale surprisingly far.
