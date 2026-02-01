@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -8,6 +9,14 @@ from typing import Any, Dict, List, Optional, Tuple
 import duckdb
 import pandas as pd
 from openai import OpenAI
+
+# Configure logging
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 
 # -----------------------------
@@ -57,8 +66,19 @@ def _df_sample_records_json_safe(df: pd.DataFrame, n: int = 10) -> list[dict[str
 
 
 def summarize_quality(con: duckdb.DuckDBPyConnection) -> Dict[str, Any]:
-    """
-    Returns counts for the same three checks used in the notebook.
+    """Return quality check counts for data validation.
+
+    Checks for:
+      - Negative revenue in conversions
+      - Orphaned conversions (no matching session)
+      - Invalid session timestamps
+      - Future session timestamps
+
+    Args:
+        con: DuckDB connection with registered tables.
+
+    Returns:
+        Dict[str, Any]: Dictionary of check names to count values.
     """
     checks = {
         "negative_revenue": int(
@@ -113,7 +133,23 @@ def apply_plan(
       pandas DataFrame -> DuckDB SELECT -> new pandas DataFrame
 
     This keeps behavior explicit and makes it easy to reason about row deltas.
-    Returns cleaned tables + final quality summary.
+
+    Args:
+        sessions: Session data DataFrame.
+        conversions: Conversion data DataFrame.
+        channels: Channel dimension DataFrame.
+        plan: Cleaning plan to execute.
+
+    Returns:
+        Tuple containing:
+          - Cleaned sessions DataFrame
+          - Cleaned conversions DataFrame
+          - Channels DataFrame (unchanged)
+          - Final quality check summary
+
+    Raises:
+        ValueError: If plan contains disallowed operations.
+        RuntimeError: If cleaning steps increase row counts.
     """
 
     sess_cur = sessions.copy()
@@ -219,55 +255,77 @@ def propose_cleaning_plan(
     sample_conversions: pd.DataFrame,
     max_steps: int = 4,
 ) -> CleaningPlan:
-    """
-    Ask an OpenAI model for a cleaning plan, constrained to ALLOWED_OPS.
+    """Ask an OpenAI model for a cleaning plan, constrained to ALLOWED_OPS.
+
+    Args:
+        model: OpenAI model name to use for planning.
+        checks_before: Quality check results before cleaning.
+        sample_sessions: Sample of session data for context.
+        sample_conversions: Sample of conversion data for context.
+        max_steps: Maximum number of cleaning steps to propose.
+
+    Returns:
+        CleaningPlan: Proposed cleaning plan with steps.
+
+    Raises:
+        RuntimeError: If OPENAI_API_KEY is not set.
+        Exception: If API call fails or response is invalid.
     """
     api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key:
+        logger.error("OPENAI_API_KEY environment variable is not set")
         raise RuntimeError("OPENAI_API_KEY is not set")
 
-    client = OpenAI()
+    try:
+        logger.info(f"Requesting cleaning plan from OpenAI model: {model}")
+        client = OpenAI()
 
-    system = (
-        "You are a data cleaning agent for a workshop. "
-        "You must output ONLY valid JSON, no markdown. "
-        "You must use only the allowed ops. "
-        "Goal: reduce all quality check counts to zero while minimizing data loss."
-    )
+        system = (
+            "You are a data cleaning agent for a workshop. "
+            "You must output ONLY valid JSON, no markdown. "
+            "You must use only the allowed ops. "
+            "Goal: reduce all quality check counts to zero while minimizing data loss."
+        )
 
-    allowed_ops = sorted(list(ALLOWED_OPS))
-    user = {
-        "now": _now_iso(),
-        "quality_checks_before": checks_before,
-        "allowed_ops": allowed_ops,
-        "max_steps": max_steps,
-        "samples": {
-            "raw_sessions_head": _df_sample_records_json_safe(sample_sessions, n=10),
-            "raw_conversions_head": _df_sample_records_json_safe(sample_conversions, n=10),
-        },
-        "instruction": (
-            "Return a JSON object: "
-            "{version: string, notes: string, steps: [{op: string, args: object}, ...]}. "
-            "Do not include any keys other than version, notes, steps. "
-            "Each step.op must be one of allowed_ops."
-        ),
-    }
+        allowed_ops = sorted(list(ALLOWED_OPS))
+        user = {
+            "now": _now_iso(),
+            "quality_checks_before": checks_before,
+            "allowed_ops": allowed_ops,
+            "max_steps": max_steps,
+            "samples": {
+                "raw_sessions_head": _df_sample_records_json_safe(sample_sessions, n=10),
+                "raw_conversions_head": _df_sample_records_json_safe(sample_conversions, n=10),
+            },
+            "instruction": (
+                "Return a JSON object: "
+                "{version: string, notes: string, steps: [{op: string, args: object}, ...]}. "
+                "Do not include any keys other than version, notes, steps. "
+                "Each step.op must be one of allowed_ops."
+            ),
+        }
 
-    resp = client.responses.create(
-        model=model,
-        input=[
-            {"role": "system", "content": system},
-            # Use default=str so any remaining non-JSON-native values (e.g. Timestamps)
-            # are safely converted to strings.
-            {"role": "user", "content": json.dumps(user, default=str)},
-        ],
-        # Ask for strict JSON output
-        text={"format": {"type": "json_object"}},
-    )
+        resp = client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": system},
+                # Use default=str so any remaining non-JSON-native values (e.g. Timestamps)
+                # are safely converted to strings.
+                {"role": "user", "content": json.dumps(user, default=str)},
+            ],
+            # Ask for strict JSON output
+            text={"format": {"type": "json_object"}},
+        )
 
-    raw = resp.output_text
-    obj = json.loads(raw)
-    return _parse_plan_json(obj)
+        raw = resp.output_text
+        obj = json.loads(raw)
+        plan = _parse_plan_json(obj)
+        logger.info(f"Successfully generated cleaning plan with {len(plan.steps)} steps")
+        return plan
+
+    except Exception as e:
+        logger.error(f"Failed to propose cleaning plan: {type(e).__name__}: {e}")
+        raise
 
 
 def judge_cleaning_result(
@@ -278,59 +336,80 @@ def judge_cleaning_result(
     rows_after: Dict[str, int],
     plan: CleaningPlan,
 ) -> Dict[str, Any]:
-    """
-    Ask an OpenAI model to act as an AI judge.
-    Returns JSON verdict with: {verdict: "pass"|"fail", reasons: [...], next_action: "..."}.
+    """Ask an OpenAI model to act as an AI judge for cleaning results.
+
+    Args:
+        model: OpenAI model name to use for judging.
+        checks_before: Quality check results before cleaning.
+        checks_after: Quality check results after cleaning.
+        rows_before: Row counts before cleaning.
+        rows_after: Row counts after cleaning.
+        plan: The cleaning plan that was executed.
+
+    Returns:
+        Dict[str, Any]: Verdict with keys: verdict, reasons, next_action.
+
+    Raises:
+        RuntimeError: If OPENAI_API_KEY is not set.
+        Exception: If API call fails or response is invalid.
     """
     api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key:
+        logger.error("OPENAI_API_KEY environment variable is not set")
         raise RuntimeError("OPENAI_API_KEY is not set")
 
-    client = OpenAI()
+    try:
+        logger.info(f"Requesting judge verdict from OpenAI model: {model}")
+        client = OpenAI()
 
-    system = (
-        "You are a strict data quality judge. "
-        "Decide PASS if and only if: (a) all quality check counts after cleaning are zero, "
-        "(b) no table's row count increased compared to before cleaning, and (c) the "
-        "fraction of rows dropped is not obviously excessive relative to the starting data. "
-        "If these conditions hold you MUST return verdict=\"pass\". Otherwise return "
-        "verdict=\"fail\" with clear reasons. Output ONLY valid JSON (no markdown)."
-    )
+        system = (
+            "You are a strict data quality judge. "
+            "Decide PASS if and only if: (a) all quality check counts after cleaning are zero, "
+            "(b) no table's row count increased compared to before cleaning, and (c) the "
+            "fraction of rows dropped is not obviously excessive relative to the starting data. "
+            "If these conditions hold you MUST return verdict=\"pass\". Otherwise return "
+            "verdict=\"fail\" with clear reasons. Output ONLY valid JSON (no markdown)."
+        )
 
-    payload = {
-        "now": _now_iso(),
-        "checks_before": checks_before,
-        "checks_after": checks_after,
-        "rows_before": rows_before,
-        "rows_after": rows_after,
-        "plan": {
-            "version": plan.version,
-            "notes": plan.notes,
-            "steps": [{"op": s.op, "args": s.args} for s in plan.steps],
-        },
-        "rules": {
-            "must_zero_all_checks": True,
-            "max_drop_fraction_soft_limit": 0.05,
-            "non_expansion_enforced_in_code": True,
-            "instructional_note": (
-                "If all checks_after are zero and no rows increased, and the fraction "
-                "of dropped rows in any table is <= max_drop_fraction_soft_limit, you "
-                "should treat the cleaning as successful and set verdict to 'pass'."
-            ),
-        },
-        "instruction": 'Return JSON: {"verdict":"pass"|"fail","reasons":[...],"next_action":"..."}',
-    }
+        payload = {
+            "now": _now_iso(),
+            "checks_before": checks_before,
+            "checks_after": checks_after,
+            "rows_before": rows_before,
+            "rows_after": rows_after,
+            "plan": {
+                "version": plan.version,
+                "notes": plan.notes,
+                "steps": [{"op": s.op, "args": s.args} for s in plan.steps],
+            },
+            "rules": {
+                "must_zero_all_checks": True,
+                "max_drop_fraction_soft_limit": 0.05,
+                "non_expansion_enforced_in_code": True,
+                "instructional_note": (
+                    "If all checks_after are zero and no rows increased, and the fraction "
+                    "of dropped rows in any table is <= max_drop_fraction_soft_limit, you "
+                    "should treat the cleaning as successful and set verdict to 'pass'."
+                ),
+            },
+            "instruction": 'Return JSON: {"verdict":"pass"|"fail","reasons":[...],"next_action":"..."}',
+        }
 
-    resp = client.responses.create(
-        model=model,
-        input=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": json.dumps(payload, default=str)},
-        ],
-        text={"format": {"type": "json_object"}},
-    )
-    result = json.loads(resp.output_text)
-    return result
+        resp = client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": json.dumps(payload, default=str)},
+            ],
+            text={"format": {"type": "json_object"}},
+        )
+        result = json.loads(resp.output_text)
+        logger.info(f"Received judge verdict: {result.get('verdict', 'unknown')}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to get judge verdict: {type(e).__name__}: {e}")
+        raise
 
 
 def run_agentic_cleaning_loop(
@@ -341,76 +420,103 @@ def run_agentic_cleaning_loop(
     judge_model: str = "gpt-5.2",
     max_iters: int = 2,
 ) -> Dict[str, Any]:
+    """Execute end-to-end agentic cleaning loop with AI planning and judging.
+
+    This function:
+      1) Measures initial quality
+      2) Uses AI model to propose cleaning plan
+      3) Applies plan deterministically
+      4) Uses AI judge to evaluate pass/fail
+      5) Optionally iterates once
+
+    Args:
+        sessions: Session data DataFrame.
+        conversions: Conversion data DataFrame.
+        channels: Channel dimension DataFrame.
+        planner_model: OpenAI model for generating cleaning plans.
+        judge_model: OpenAI model for judging results.
+        max_iters: Maximum number of cleaning iterations.
+
+    Returns:
+        Dict[str, Any]: Results including plan, judge verdict, cleaned tables, and checks.
+
+    Raises:
+        RuntimeError: If OPENAI_API_KEY is not set.
+        Exception: If cleaning process fails.
     """
-    End-to-end "agentic" loop:
-      1) measure quality
-      2) model proposes plan
-      3) we apply plan deterministically
-      4) judge evaluates pass/fail
-      5) optionally iterate once
+    logger.info("Starting agentic cleaning loop")
+    logger.info(f"Initial data: {len(sessions)} sessions, {len(conversions)} conversions")
 
-    Returns dict with plan, judge verdict, cleaned tables, and checks.
-    """
-    # Snapshot before
-    con0 = duckdb.connect(database=":memory:")
-    con0.register("raw_sessions", sessions)
-    con0.register("raw_conversions", conversions)
-    con0.register("dim_channels", channels)
+    try:
+        # Snapshot before
+        con0 = duckdb.connect(database=":memory:")
+        con0.register("raw_sessions", sessions)
+        con0.register("raw_conversions", conversions)
+        con0.register("dim_channels", channels)
 
-    checks_before = summarize_quality(con0)
-    rows_before = {
-        "raw_sessions": len(sessions),
-        "raw_conversions": len(conversions),
-    }
+        checks_before = summarize_quality(con0)
+        rows_before = {
+            "raw_sessions": len(sessions),
+            "raw_conversions": len(conversions),
+        }
+        logger.info(f"Initial quality checks: {checks_before}")
 
-    plan: Optional[CleaningPlan] = None
-    last_verdict: Optional[Dict[str, Any]] = None
-    sess, conv, chan = sessions, conversions, channels
-    checks_after: Dict[str, Any] = checks_before
+        plan: Optional[CleaningPlan] = None
+        last_verdict: Optional[Dict[str, Any]] = None
+        sess, conv, chan = sessions, conversions, channels
+        checks_after: Dict[str, Any] = checks_before
 
-    for i in range(max_iters):
-        print(f"[AI CLEANING] Iteration {i+1} - checks_before: {checks_after}")
+        for i in range(max_iters):
+            logger.info(f"Iteration {i+1}/{max_iters} - current checks: {checks_after}")
 
-        plan = propose_cleaning_plan(
-            model=planner_model,
-            checks_before=checks_after,
-            sample_sessions=sess,
-            sample_conversions=conv,
-            max_steps=4,
-        )
-        sess2, conv2, chan2, checks2 = apply_plan(sess, conv, chan, plan)
+            plan = propose_cleaning_plan(
+                model=planner_model,
+                checks_before=checks_after,
+                sample_sessions=sess,
+                sample_conversions=conv,
+                max_steps=4,
+            )
+            sess2, conv2, chan2, checks2 = apply_plan(sess, conv, chan, plan)
 
-        rows_after = {"raw_sessions": len(sess2), "raw_conversions": len(conv2)}
-        verdict = judge_cleaning_result(
-            model=judge_model,
-            checks_before=checks_before,
-            checks_after=checks2,
-            rows_before=rows_before,
-            rows_after=rows_after,
-            plan=plan,
-        )
+            rows_after = {"raw_sessions": len(sess2), "raw_conversions": len(conv2)}
+            verdict = judge_cleaning_result(
+                model=judge_model,
+                checks_before=checks_before,
+                checks_after=checks2,
+                rows_before=rows_before,
+                rows_after=rows_after,
+                plan=plan,
+            )
 
-        print(f"[AI CLEANING] Iteration {i+1} - checks_after: {checks2}, verdict: {verdict.get('verdict')}")
+            logger.info(f"Iteration {i+1} complete - checks: {checks2}, verdict: {verdict.get('verdict')}")
 
-        sess, conv, chan = sess2, conv2, chan2
-        checks_after = checks2
-        last_verdict = verdict
+            sess, conv, chan = sess2, conv2, chan2
+            checks_after = checks2
+            last_verdict = verdict
 
-        if verdict.get("verdict") == "pass":
-            break
+            if verdict.get("verdict") == "pass":
+                logger.info("Cleaning passed, exiting loop")
+                break
 
-    return {
-        "checks_before": checks_before,
-        "checks_after": checks_after,
-        "rows_before": rows_before,
-        "rows_after": {"raw_sessions": len(sess), "raw_conversions": len(conv)},
-        "plan": {
-            "version": plan.version if plan else None,
-            "notes": plan.notes if plan else None,
-            "steps": [{"op": s.op, "args": s.args} for s in (plan.steps if plan else [])],
-        },
-        "judge": last_verdict,
-        "sessions_clean": sess,
-        "conversions_clean": conv,
-        "channels": chan,
-    }
+        result = {
+            "checks_before": checks_before,
+            "checks_after": checks_after,
+            "rows_before": rows_before,
+            "rows_after": {"raw_sessions": len(sess), "raw_conversions": len(conv)},
+            "plan": {
+                "version": plan.version if plan else None,
+                "notes": plan.notes if plan else None,
+                "steps": [{"op": s.op, "args": s.args} for s in (plan.steps if plan else [])],
+            },
+            "judge": last_verdict,
+            "sessions_clean": sess,
+            "conversions_clean": conv,
+            "channels": chan,
+        }
+
+        logger.info("Agentic cleaning loop completed successfully")
+        return result
+
+    except Exception as e:
+        logger.error(f"Agentic cleaning loop failed: {type(e).__name__}: {e}")
+        raise
