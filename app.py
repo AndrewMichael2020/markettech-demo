@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from ai_cleaning_agent import run_agentic_cleaning_loop
+from src.ai_cleaning_agent import run_agentic_cleaning_loop
 
 # Configure logging
 logger = logging.getLogger(__name__)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -8,6 +9,14 @@ from typing import Any, Dict, List, Optional, Tuple
 import duckdb
 import pandas as pd
 import requests
+
+# Configure logging
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 # -----------------------------
 # Contract: allowed operations
@@ -40,7 +49,16 @@ ALLOWED_OPS = {
 }
 
 
-def _df_sample_records_json_safe(df: pd.DataFrame, n: int = 10) -> list[dict[str, Any]]:
+def _df_sample_records_json_safe(df: pd.DataFrame, n: int = 10) -> List[Dict[str, Any]]:
+    """Convert DataFrame sample to JSON-serializable records.
+
+    Args:
+        df: Source DataFrame.
+        n: Number of records to sample.
+
+    Returns:
+        List of dictionaries representing DataFrame rows.
+    """
     sample = df.head(n).copy()
 
     for col in sample.columns:
@@ -51,6 +69,20 @@ def _df_sample_records_json_safe(df: pd.DataFrame, n: int = 10) -> list[dict[str
 
 
 def summarize_quality(con: duckdb.DuckDBPyConnection) -> Dict[str, Any]:
+    """Return quality check counts for data validation.
+
+    Checks for:
+      - Negative revenue in conversions
+      - Orphaned conversions (no matching session)
+      - Invalid session timestamps
+      - Future session timestamps
+
+    Args:
+        con: DuckDB connection with registered tables.
+
+    Returns:
+        Dict[str, Any]: Dictionary of check names to count values.
+    """
     checks = {
         "negative_revenue": int(
             con.execute("SELECT COUNT(*) FROM raw_conversions WHERE revenue < 0").fetchone()[0]
@@ -94,6 +126,25 @@ def apply_plan(
     channels: pd.DataFrame,
     plan: CleaningPlan,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
+    """Apply a cleaning plan deterministically using DuckDB.
+
+    Args:
+        sessions: Session data DataFrame.
+        conversions: Conversion data DataFrame.
+        channels: Channel dimension DataFrame.
+        plan: Cleaning plan to execute.
+
+    Returns:
+        Tuple containing:
+          - Cleaned sessions DataFrame
+          - Cleaned conversions DataFrame
+          - Channels DataFrame (unchanged)
+          - Final quality check summary
+
+    Raises:
+        ValueError: If plan contains disallowed operations.
+        RuntimeError: If cleaning steps increase row counts.
+    """
     sess_cur = sessions.copy()
     conv_cur = conversions.copy()
     chan_cur = channels.copy()
@@ -245,23 +296,42 @@ def _extract_first_json_object(text: str) -> str:
 
 
 def _post_chat(messages: List[Dict[str, Any]], max_tokens: int = 1024, temperature: float = 0.1) -> str:
-    url = f"{_gemma_api_base()}/chat/completions"
-    payload = {
-        "model": _gemma_model_name(),
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": False,
-    }
+    """Send chat request to local Gemma llamafile.
 
-    resp = requests.post(url, json=payload, timeout=300)
-    resp.raise_for_status()
-    data = resp.json()
+    Args:
+        messages: List of message dictionaries with role and content.
+        max_tokens: Maximum tokens to generate.
+        temperature: Sampling temperature.
 
+    Returns:
+        str: Model response content.
+
+    Raises:
+        requests.HTTPError: If API request fails.
+        RuntimeError: If response format is unexpected.
+    """
     try:
+        url = f"{_gemma_api_base()}/chat/completions"
+        payload = {
+            "model": _gemma_model_name(),
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+
+        logger.debug(f"Sending request to Gemma API at {url}")
+        resp = requests.post(url, json=payload, timeout=300)
+        resp.raise_for_status()
+        data = resp.json()
+
         return data["choices"][0]["message"]["content"]
-    except Exception as exc:  # pragma: no cover - defensive
+    except KeyError as exc:
+        logger.error(f"Unexpected Gemma response format: {data}")
         raise RuntimeError(f"Unexpected Gemma response format: {data}") from exc
+    except requests.RequestException as exc:
+        logger.error(f"Gemma API request failed: {exc}")
+        raise
 
 
 def propose_cleaning_plan_gemma(
@@ -270,6 +340,22 @@ def propose_cleaning_plan_gemma(
     sample_conversions: pd.DataFrame,
     max_steps: int = 4,
 ) -> CleaningPlan:
+    """Ask local Gemma model for a cleaning plan.
+
+    Args:
+        checks_before: Quality check results before cleaning.
+        sample_sessions: Sample of session data for context.
+        sample_conversions: Sample of conversion data for context.
+        max_steps: Maximum number of cleaning steps to propose.
+
+    Returns:
+        CleaningPlan: Proposed cleaning plan with steps.
+
+    Raises:
+        RuntimeError: If Gemma API is not available or returns invalid response.
+        ValueError: If response cannot be parsed as valid plan.
+    """
+    logger.info("Requesting cleaning plan from local Gemma model")
     system = (
         "You are a data cleaning agent for a workshop. "
         "You must output ONLY valid JSON, no markdown. "

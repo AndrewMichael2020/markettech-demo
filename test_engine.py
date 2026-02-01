@@ -8,8 +8,8 @@ import duckdb
 import pandas as pd
 import pytest
 
-from markettech_workshop import generate_stream, build_semantic_view
-from ai_cleaning_agent import (
+from src.markettech_workshop import generate_stream, build_semantic_view
+from src.ai_cleaning_agent import (
     run_agentic_cleaning_loop,
     summarize_quality,
     apply_plan,
@@ -76,6 +76,7 @@ def test_quality_checks_default_data_passes() -> None:
     assert future == 0
 
 
+@pytest.mark.ai
 def test_agentic_cleaning_requires_openai_key() -> None:
     """Document that the AI cleaning loop depends on OPENAI_API_KEY.
 
