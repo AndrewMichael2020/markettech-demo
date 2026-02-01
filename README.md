@@ -183,6 +183,14 @@ source .venv/bin/activate
 
 ### 2. Install dependencies
 
+You can use the Makefile for standardized setup:
+
+```bash
+make setup
+```
+
+Or manually:
+
 ```bash
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
@@ -191,12 +199,25 @@ pip install -r requirements-dev.txt
 ### 3. Run the tests (optional but recommended)
 
 ```bash
-pytest -q
+make test
 ```
 
+Or manually:
+
+```bash
+pytest -m "not ai"
+```
+
+This runs all tests except AI-dependent tests (which require API keys).
 If this passes, your environment matches the expected behavior.
 
 ### 4. Start the Streamlit app
+
+```bash
+make run
+```
+
+Or manually:
 
 ```bash
 streamlit run app.py
@@ -212,6 +233,45 @@ What to try in the app:
   definition changes conversions.
 - Turn on **Inject demo anomalies** to introduce a small amount of bad data.
 - (If enabled) click **Run AI cleaner + judge** to see an AI plan and verdict.
+
+---
+
+## Repository structure
+
+The repository follows production-ready best practices:
+
+```
+markettech-demo/
+├── src/                          # Core application logic (isolates namespace)
+│   ├── __init__.py
+│   ├── config.py                 # Environment variable configuration
+│   ├── logger.py                 # Centralized logging setup
+│   ├── ai_cleaning_agent.py     # OpenAI-based cleaning agent
+│   ├── gemma_cleaning_agent.py  # Local Gemma LLM cleaning agent
+│   └── markettech_workshop.py   # Core workshop logic
+├── app.py                        # Streamlit application entry point
+├── test_engine.py                # Test suite
+├── requirements.txt              # Production dependencies (pinned versions)
+├── requirements-dev.txt          # Development dependencies
+├── Makefile                      # Standard commands (setup, test, run, clean)
+├── pytest.ini                    # Test configuration with AI markers
+├── .env.example                  # Environment variable template
+├── Dockerfile                    # Container configuration
+├── .github/workflows/            # CI/CD pipelines
+│   ├── ci.yml                   # Test and deploy workflow
+│   └── docker.yml               # Docker build validation
+└── main.tf, variables.tf        # Terraform infrastructure
+```
+
+### Key architectural decisions:
+
+- **src/ layout**: Core logic is isolated in the `src/` package to prevent import collisions
+  and enforce modular design (production standard, not "educational" flat structure)
+- **Type hints**: All functions have complete type annotations for maintainability
+- **Logging**: Structured logging instead of print statements for production observability
+- **Config management**: Environment variables loaded via `src/config.py` (no hardcoded values)
+- **Test markers**: Tests marked with `@pytest.mark.ai` for AI/LLM tests that can be
+  excluded in CI (`make test` excludes them, `make test-all` includes them)
 
 ---
 

@@ -258,8 +258,8 @@ def run_quality_checks(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
 
 # %%
 import os
-from ai_cleaning_agent import run_agentic_cleaning_loop
-from gemma_cleaning_agent import run_agentic_cleaning_loop_gemma
+from src.ai_cleaning_agent import run_agentic_cleaning_loop
+from src.gemma_cleaning_agent import run_agentic_cleaning_loop_gemma
 
 def inject_corruption(df_sess: pd.DataFrame, df_conv: pd.DataFrame, frac: float = 0.003) -> tuple[pd.DataFrame, pd.DataFrame]:
     """

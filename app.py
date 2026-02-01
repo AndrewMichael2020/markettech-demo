@@ -1,17 +1,26 @@
 from __future__ import annotations
 
-import os
-
 import datetime as dt
+import logging
+import os
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, Optional
 
 import duckdb
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-from ai_cleaning_agent import run_agentic_cleaning_loop
+from src.ai_cleaning_agent import run_agentic_cleaning_loop
+from src.markettech_workshop import inject_corruption
+
+# Configure logging
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 # Deterministic demo
 np.random.seed(2026)
@@ -25,6 +34,22 @@ class Channel:
 
 
 def generate_stream(days: int = 60, start_date: dt.date = dt.date(2025, 9, 1)) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Generate a deterministic event stream for the workshop.
+
+    Simulates two event types:
+      - session_start: User visits to the site
+      - purchase: Conversion events
+
+    Args:
+        days: Number of days of data to generate.
+        start_date: Start date for the data generation.
+
+    Returns:
+        Tuple containing:
+          - sessions: DataFrame with session_start events
+          - conversions: DataFrame with purchase events
+          - channels: DataFrame with channel dimension data
+    """
     channels = [
         Channel("CH_ORG", "Organic", 0.00),
         Channel("CH_SOC", "Paid Social", 12.50),
@@ -85,45 +110,15 @@ def generate_stream(days: int = 60, start_date: dt.date = dt.date(2025, 9, 1)) -
     return sessions, conversions, df_chan
 
 
-def inject_corruption(df_sess: pd.DataFrame, df_conv: pd.DataFrame, frac: float = 0.003) -> tuple[pd.DataFrame, pd.DataFrame]:
-    df_sess2 = df_sess.copy()
-    df_conv2 = df_conv.copy()
-
-    n_sess = len(df_sess2)
-    n_conv = len(df_conv2)
-
-    # Mirror the workshop corruption strategy: add bad duplicates so that
-    # dropping them can fully restore the original dataset.
-
-    # 1) Negative revenue duplicates
-    k = max(1, int(n_conv * frac))
-    idx = df_conv2.sample(k, random_state=2026).index
-    neg_dupes = df_conv2.loc[idx].copy()
-    neg_dupes["revenue"] = -neg_dupes["revenue"].abs()
-    df_conv2 = pd.concat([df_conv2, neg_dupes], ignore_index=True)
-
-    # 2) Future session duplicates (timezone-naive to avoid mixed dtypes)
-    k2 = max(1, int(n_sess * frac))
-    idx2 = df_sess2.sample(k2, random_state=2027).index
-    future_dupes = df_sess2.loc[idx2].copy()
-    future_dupes["ts"] = dt.datetime.utcnow() + dt.timedelta(days=30)
-    df_sess2 = pd.concat([df_sess2, future_dupes], ignore_index=True)
-
-    # 3) Orphan conversion duplicates with guaranteed-missing session_id
-    k3 = max(1, int(n_conv * frac))
-    idx3 = df_conv2.sample(k3, random_state=2028).index
-    orphan_dupes = df_conv2.loc[idx3].copy()
-    orphan_dupes["session_id"] = "999999999999"
-    df_conv2 = pd.concat([df_conv2, orphan_dupes], ignore_index=True)
-
-    return df_sess2, df_conv2
-
-
 def build_semantic_view(con: duckdb.DuckDBPyConnection, window_days: int) -> None:
     """(Re)build the semantic view used by the app.
 
     Uses TRY_CAST for timestamps so that any corrupted values become NULL
     instead of crashing the query engine.
+
+    Args:
+        con: DuckDB connection with registered tables.
+        window_days: Attribution window in days for the metric contract.
     """
     window_days = int(window_days)
     con.execute(f"""
@@ -151,6 +146,12 @@ def semantic_contract_sql(window_days: int) -> str:
     """Return the semantic SQL for the metric contract shown in the UI.
 
     This mirrors build_semantic_view so the contract is visible to non-coders.
+
+    Args:
+        window_days: Attribution window in days for the metric contract.
+
+    Returns:
+        str: SQL string for creating the f_attribution view.
     """
     window_days = int(window_days)
     return f"""
@@ -222,6 +223,14 @@ JOIN dim_channels c
 
 
 def channel_summary(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """Generate channel performance summary from the semantic view.
+
+    Args:
+        con: DuckDB connection with f_attribution view available.
+
+    Returns:
+        pd.DataFrame: Channel performance metrics including traffic, conversions, and spend.
+    """
     sql = """
     SELECT
         channel_name,
@@ -238,11 +247,22 @@ def channel_summary(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def load_engine(days: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load_engine(days: int) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load the event stream engine with caching for performance.
+
+    Args:
+        days: Number of days of data to generate.
+
+    Returns:
+        Tuple containing sessions, conversions, and channels DataFrames.
+    """
     return generate_stream(days=days)
 
 
 def main() -> None:
+    """Main application entry point for the Streamlit dashboard."""
+    logger.info("Starting NorthPeak Retail dashboard")
+
     st.set_page_config(page_title="NorthPeak Retail", layout="wide")
 
     # Global style tweaks for workshop presentation (typography, cards, spacing).
@@ -400,9 +420,11 @@ def main() -> None:
     if ai_clicked:
         api_key_present = os.getenv("OPENAI_API_KEY", "").strip() != ""
         if not api_key_present:
+            logger.warning("OPENAI_API_KEY not set, AI cleaning disabled")
             st.warning("OPENAI_API_KEY is not set on this server. AI cleaning is disabled.")
         else:
             try:
+                logger.info("Starting AI cleaning loop")
                 ai_result = run_agentic_cleaning_loop(
                     sessions=df_sess,
                     conversions=df_conv,
@@ -411,8 +433,10 @@ def main() -> None:
                     judge_model="gpt-5.2",
                     max_iters=2,
                 )
+                logger.info("AI cleaning loop completed successfully")
             except Exception as e:
                 # Surface a friendly error in the UI without breaking the whole app.
+                logger.error(f"AI cleaning agent failed: {type(e).__name__}: {e}", exc_info=True)
                 st.error(f"AI cleaning agent failed: {e}")
                 ai_result = None
             else:
