@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from src.ai_cleaning_agent import run_agentic_cleaning_loop
+from src.markettech_workshop import inject_corruption
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -107,55 +108,6 @@ def generate_stream(days: int = 60, start_date: dt.date = dt.date(2025, 9, 1)) -
     })
 
     return sessions, conversions, df_chan
-
-
-def inject_corruption(df_sess: pd.DataFrame, df_conv: pd.DataFrame, frac: float = 0.003) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Inject intentional data quality issues for demonstration purposes.
-
-    Adds bad duplicates that can be cleaned up by the quality checks:
-      1) Negative revenue duplicates
-      2) Future session duplicates
-      3) Orphan conversion duplicates
-
-    Args:
-        df_sess: Session data DataFrame.
-        df_conv: Conversion data DataFrame.
-        frac: Fraction of records to corrupt (default: 0.003).
-
-    Returns:
-        Tuple containing corrupted sessions and conversions DataFrames.
-    """
-    df_sess2 = df_sess.copy()
-    df_conv2 = df_conv.copy()
-
-    n_sess = len(df_sess2)
-    n_conv = len(df_conv2)
-
-    # Mirror the workshop corruption strategy: add bad duplicates so that
-    # dropping them can fully restore the original dataset.
-
-    # 1) Negative revenue duplicates
-    k = max(1, int(n_conv * frac))
-    idx = df_conv2.sample(k, random_state=2026).index
-    neg_dupes = df_conv2.loc[idx].copy()
-    neg_dupes["revenue"] = -neg_dupes["revenue"].abs()
-    df_conv2 = pd.concat([df_conv2, neg_dupes], ignore_index=True)
-
-    # 2) Future session duplicates (timezone-naive to avoid mixed dtypes)
-    k2 = max(1, int(n_sess * frac))
-    idx2 = df_sess2.sample(k2, random_state=2027).index
-    future_dupes = df_sess2.loc[idx2].copy()
-    future_dupes["ts"] = dt.datetime.utcnow() + dt.timedelta(days=30)
-    df_sess2 = pd.concat([df_sess2, future_dupes], ignore_index=True)
-
-    # 3) Orphan conversion duplicates with guaranteed-missing session_id
-    k3 = max(1, int(n_conv * frac))
-    idx3 = df_conv2.sample(k3, random_state=2028).index
-    orphan_dupes = df_conv2.loc[idx3].copy()
-    orphan_dupes["session_id"] = "999999999999"
-    df_conv2 = pd.concat([df_conv2, orphan_dupes], ignore_index=True)
-
-    return df_sess2, df_conv2
 
 
 def build_semantic_view(con: duckdb.DuckDBPyConnection, window_days: int) -> None:

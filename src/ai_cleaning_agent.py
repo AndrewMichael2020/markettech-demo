@@ -305,19 +305,19 @@ def propose_cleaning_plan(
             ),
         }
 
-        resp = client.responses.create(
+        resp = client.chat.completions.create(
             model=model,
-            input=[
+            messages=[
                 {"role": "system", "content": system},
                 # Use default=str so any remaining non-JSON-native values (e.g. Timestamps)
                 # are safely converted to strings.
                 {"role": "user", "content": json.dumps(user, default=str)},
             ],
             # Ask for strict JSON output
-            text={"format": {"type": "json_object"}},
+            response_format={"type": "json_object"},
         )
 
-        raw = resp.output_text
+        raw = resp.choices[0].message.content
         obj = json.loads(raw)
         plan = _parse_plan_json(obj)
         logger.info(f"Successfully generated cleaning plan with {len(plan.steps)} steps")
@@ -395,15 +395,15 @@ def judge_cleaning_result(
             "instruction": 'Return JSON: {"verdict":"pass"|"fail","reasons":[...],"next_action":"..."}',
         }
 
-        resp = client.responses.create(
+        resp = client.chat.completions.create(
             model=model,
-            input=[
+            messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": json.dumps(payload, default=str)},
             ],
-            text={"format": {"type": "json_object"}},
+            response_format={"type": "json_object"},
         )
-        result = json.loads(resp.output_text)
+        result = json.loads(resp.choices[0].message.content)
         logger.info(f"Received judge verdict: {result.get('verdict', 'unknown')}")
         return result
 
