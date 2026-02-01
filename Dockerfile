@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy application code needed by Streamlit
 COPY app.py /app/app.py
-COPY ai_cleaning_agent.py /app/ai_cleaning_agent.py
+COPY src/ /app/src/
 
 # Cloud Run provides PORT; Streamlit must listen on it
 CMD streamlit run app.py --server.port=${PORT:-8080} --server.address=0.0.0.0 --server.headless=true --server.enableCORS=false

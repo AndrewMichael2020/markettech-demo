@@ -6,6 +6,7 @@ on:
     paths:
       - "Dockerfile"
       - "app.py"
+      - "src/**"
       - "requirements.txt"
       - ".github/workflows/docker.yml"
   pull_request:
