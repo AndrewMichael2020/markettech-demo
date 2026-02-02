@@ -40,7 +40,7 @@ By working through this repo, students see the full story:
 1. **Event data → tables**  
    Simulated sessions and purchases land in DuckDB as `raw_sessions` and
    `raw_conversions`.
-2. **Metric contract**  
+2. **Metric "contract" (whatever your client wants to see as KPIs -- metric definitions as code)**  
    A SQL view (`f_attribution`) defines when a purchase “counts” as
    attributed to a session (within N days).
 3. **Quality checks**  
@@ -54,7 +54,7 @@ By working through this repo, students see the full story:
    fix bad rows, and an AI judge checks the result.
 
 The goal is to move from an **Excel mindset** (“numbers just appear”) to a
-**systems mindset** (“numbers come from code, contracts, and checks”).
+**systems mindset** (“numbers come from code, metric definitions, and checks”).
 
 ---
 
@@ -83,14 +83,14 @@ Ask: “Where have you seen ‘dueling dashboards’ in real life?”
 **Q&A (3–5 minutes):**  
 Ask: “Which of these raw columns would you *not* show directly to a VP, and why?”
 
-### 25–40: Notebook – the metric contract
+### 25–40: Notebook – the metric "contract"
 
 - Build `f_attribution` as a semantic view on top of the raw tables.
-- Define the contract: a purchase only counts if it happens within **N days**
+- Define the "contract": a purchase only counts if it happens within **N days**
   of a session.
 - Compare:
   - naive conversions (every purchase)
-  - trusted conversions (within the contract window)
+  - trusted conversions (within the "contract" window)
   - out-of-window conversions.
 - Flip the window from 7 → 30 days and see how “truth” changes.
 
@@ -117,13 +117,13 @@ Ask: “Which check would you add next for your own company’s data?”
 
 - Briefly show that the AI cleaner (OpenAI or local Gemma) proposes a plan
   and that a judge reviews it.
-- Emphasize that the AI is constrained by **your** contract and quality rules.
+- Emphasize that the AI is constrained by **your** definitions and quality rules.
 - Connect to real teams: how this pattern maps to BI tools, data platforms,
   and ML systems students might see on co‑op.
 
 **Final close (2–3 minutes):**
 
-- One-line summary: **Metrics are code, contracts are governance, and
+- One-line summary: **Metrics are code, "contracts" (KPIs as code) are governance, and
   products are URLs.**
 - Invite questions about how they might adapt this pattern to their own
   internships or projects.
@@ -137,14 +137,14 @@ Ask: “Which check would you add next for your own company’s data?”
   either version.
 - `app.py`  
   The Streamlit app (NorthPeak Retail). Uses the same data generator and SQL
-  contract as the notebook.
+  "contract" as the notebook.
 - `ai_cleaning_agent.py`  
   Optional agentic loop: planner model, deterministic cleaning code,
   and judge model.
 - `test_engine.py`  
   A few small tests that prove:
   - data generation is deterministic
-  - the metric contract behaves as described
+  - the metric "contract" behaves as described
   - the AI cleaner only runs when a key is present.
 - `.github/workflows/ci.yml`  
   CI pipeline: runs tests and, on `main`, builds and deploys to Cloud Run.
@@ -165,7 +165,15 @@ prepare the Cloud Run URL for you.
 
 ---
 
-## Quickstart for students (local run)
+The Dashboard (instructor to provide link to the published dashboard)
+
+<img width="1863" height="857" alt="Screenshot 2026-01-29 011458" src="https://github.com/user-attachments/assets/8c45d466-4cdb-4b22-b4f8-15bb84ea82b6" />
+<img width="1887" height="937" alt="Screenshot 2026-01-29 011517" src="https://github.com/user-attachments/assets/bf9c3848-ef8e-409f-84ff-b3ce48d467d1" />
+<img width="1860" height="949" alt="Screenshot 2026-01-29 023404" src="https://github.com/user-attachments/assets/92490bde-2f55-40cc-9cd3-d9f6b6d93523" />
+
+---
+
+## Quickstart for student developers for testing (local run)
 
 ### 1. Create and activate a virtual environment
 
@@ -196,7 +204,7 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
-### 3. Run the tests (optional but recommended)
+### 3. Running the tests (for student developers)
 
 ```bash
 make test
@@ -211,7 +219,7 @@ pytest -m "not ai"
 This runs all tests except AI-dependent tests (which require API keys).
 If this passes, your environment matches the expected behavior.
 
-### 4. Start the Streamlit app
+### 4. Start the Streamlit dashboard app
 
 ```bash
 make run
@@ -229,7 +237,7 @@ you the exact URL). This is the **NorthPeak Retail** app.
 What to try in the app:
 
 - Change the **History window (days)** to see how much raw data you replay.
-- Change the **Attribution contract window (days)** to see how the metric
+- Change the **Attribution window (days)** to see how the metric
   definition changes conversions.
 - Turn on **Inject demo anomalies** to introduce a small amount of bad data.
 - (If enabled) click **Run AI cleaner + judge** to see an AI plan and verdict.
@@ -275,7 +283,7 @@ markettech-demo/
 
 ---
 
-## Optional: AI cleaning agent and AI judge
+## GenAI capability showcase: AI cleaning agent with a judge
 
 There are two ways to run the AI cleaning loop:
 
@@ -316,7 +324,7 @@ Behind the scenes:
 If `OPENAI_API_KEY` is not set (and no local Gemma server is configured),
 the app will simply skip the AI part and explain that AI is optional.
 
-### Option B: Local Gemma llamafile (no external API calls)
+### Option B (cool option): Local Gemma llamafile (sovereign; no external API calls)
 
 You can also run the AI cleaning loop entirely locally using the
 `google_gemma-3-4b-it-Q6_K.llamafile` from Mozilla AI.
@@ -396,7 +404,7 @@ reason about: latency and model quality vs. control and privacy.
 
 ---
 
-## Appendix A: Cloud Run and CI/CD (for instructors / DevOps)
+## Appendix A: Cloud Run and CI/CD (for instructors / students who pay attention to DevOps)
 
 You do **not** need this section to learn analytics concepts. This is for
 people setting up the hosted version of the app.
@@ -459,7 +467,7 @@ If you prefer a one-off manual deploy instead of CI/CD, you can still use
 `deploy_cloud_run.sh`, `cleanup_cloud_run.sh`, and `set_openai_key_cloud_run.sh`
 from Cloud Shell, but the recommended path is the GitHub Actions pipeline.
 
-## Appendix B: Teardown / cleanup (for instructors)
+## Appendix B: Teardown / cleanup 
 
 When you are done with the workshop environment, you can clean up GCP
 resources from Cloud Shell:
@@ -483,11 +491,11 @@ gcloud secrets delete openai-api-key --quiet
 
 ## Beyond this workshop
 
-After you finish the exercises, it is worth stepping back and noticing what
+After you finish reviewing this demo, it is worth stepping back and noticing what
 you have actually done:
 
 - You started from raw event data and used SQL to define a clear, repeatable
-  metric contract.
+  metric "contract" (KPIs as code).
 - You added simple but powerful quality checks so that silent data problems
   do not turn into silent business problems.
 - You wrapped that logic in a real app (Streamlit) that non-technical
@@ -499,7 +507,7 @@ In production teams, people layer on more engineering practices (CI/CD,
 RBAC, multiple databases, etc.), but the **core ideas do not change**:
 
 - metrics are defined in code,
-- contracts and checks protect “truth”,
+- "contracts" (whatever you negotiated the KPIs are) and checks protect true representations of business states,
 - and products are just user-friendly ways to surface that logic.
 
 The point is not to turn every analyst into a platform engineer. The point is
