@@ -16,7 +16,7 @@ The bigger theme: modern analytics is **not only Power BI / dashboards**.
 With a bit of Python and SQL, you can build your own small but robust
 analytics products: local apps, hosted apps, and even CI/CD pipelines with
 role-based access and AI assistance – all using the same core ideas you
-already know from analytics work.
+already know from analytics work. 
 
 ---
 
