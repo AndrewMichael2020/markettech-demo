@@ -161,11 +161,11 @@ fi
 
 # Test 11: Verify deploy script documentation
 echo ""
-echo "Test 11: Verify script contains helpful output messages"
-if grep -q "Applying Terraform\|Building and pushing image" "$DEPLOY_SCRIPT"; then
-    print_test_result "Script contains informative messages" "PASS"
+echo "Test 11: Verify script contains informative output messages"
+if grep -q "Applying Terraform" "$DEPLOY_SCRIPT" && grep -q "Building and pushing image" "$DEPLOY_SCRIPT"; then
+    print_test_result "Script contains deployment progress messages" "PASS"
 else
-    print_test_result "Script contains informative messages" "FAIL"
+    print_test_result "Script contains deployment progress messages" "FAIL"
 fi
 
 # Summary

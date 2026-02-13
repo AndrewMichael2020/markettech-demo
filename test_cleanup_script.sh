@@ -146,20 +146,16 @@ for tf_file in main.tf variables.tf versions.tf; do
     fi
 done
 
-# Test 8: Verify terraform files are referenced from correct location
+# Test 8: Verify script runs terraform commands from repository root
 echo ""
-echo "Test 8: Verify script runs terraform commands from repository root"
-# The script should run terraform commands without changing directories
-if ! grep -q "pushd\|cd " "$CLEANUP_SCRIPT" | grep -v "echo\|#"; then
-    print_test_result "Script runs terraform from current directory" "PASS"
+echo "Test 8: Verify script runs terraform from current directory"
+# The script should run terraform commands without changing directories (no pushd/cd)
+# We need to exclude comments and echo statements from the check
+if grep -E "^[^#]*\bpushd\b" "$CLEANUP_SCRIPT" | grep -v echo > /dev/null; then
+    print_test_result "Script runs terraform from current directory" "FAIL"
+    echo "  Error: Script changes directory before running terraform"
 else
-    # Check if there's actually a pushd that affects terraform
-    if grep -B1 -A1 "terraform" "$CLEANUP_SCRIPT" | grep -q "pushd"; then
-        print_test_result "Script runs terraform from current directory" "FAIL"
-        echo "  Error: Script changes directory before running terraform"
-    else
-        print_test_result "Script runs terraform from current directory" "PASS"
-    fi
+    print_test_result "Script runs terraform from current directory" "PASS"
 fi
 
 # Test 9: Script has proper error handling
