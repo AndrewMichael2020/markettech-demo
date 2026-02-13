@@ -15,7 +15,5 @@ echo "Building and pushing image with Cloud Build..."
 gcloud builds submit --tag "${IMAGE}" .
 
 echo "Applying Terraform..."
-pushd terraform >/dev/null
 terraform init -upgrade
 terraform apply -auto-approve   -var="project_id=${PROJECT_ID}"   -var="region=${REGION}"   -var="repo=${REPO}"   -var="service_name=${SERVICE}"   -var="image=${IMAGE}"
-popd >/dev/null

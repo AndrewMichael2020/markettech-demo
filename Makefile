@@ -1,4 +1,4 @@
-.PHONY: setup test test-all clean run lint help
+.PHONY: setup test test-all test-infrastructure clean run lint help
 
 # System Strategy: Detect OS to set the correct python command
 PYTHON := python3
@@ -26,6 +26,10 @@ test-all: ## Run all tests including AI tests
 
 test-coverage: ## Run tests with coverage report
 	$(PYTHON) -m pytest --cov=src --cov-report=html --cov-report=term -m "not ai"
+
+test-infrastructure: ## Test infrastructure deployment and cleanup scripts
+	@echo "Testing infrastructure scripts..."
+	@./test_infrastructure_scripts.sh
 
 run: ## Run local Streamlit application
 	$(PYTHON) -m streamlit run app.py

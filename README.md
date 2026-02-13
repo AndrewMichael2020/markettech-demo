@@ -470,7 +470,47 @@ from Cloud Shell, but the recommended path is the GitHub Actions pipeline.
 ## Appendix B: Teardown / cleanup 
 
 When you are done with the workshop environment, you can clean up GCP
-resources from Cloud Shell:
+resources in two ways:
+
+### Option 1: Using the cleanup script (Recommended)
+
+The repository includes a cleanup script that uses Terraform to properly
+tear down all managed resources:
+
+```bash
+# Set your GCP project ID
+export PROJECT_ID="your-project-id"
+
+# Optional: Override defaults if you used custom values
+export REGION="us-central1"
+export REPO="markettech"
+export SERVICE="markettech-truth-engine"
+
+# Run the cleanup script
+./cleanup_cloud_run.sh
+```
+
+The script will:
+- Initialize Terraform
+- Destroy all Terraform-managed resources (Cloud Run service, Artifact Registry)
+- Provide optional commands for further cleanup (billing, project deletion)
+
+**Testing the cleanup script:**
+
+Before running cleanup on a real project, you can verify the script is
+properly configured:
+
+```bash
+# Run all infrastructure script tests
+./test_infrastructure_scripts.sh
+
+# Or test cleanup script only
+./test_cleanup_script.sh
+```
+
+### Option 2: Manual cleanup via gcloud commands
+
+You can also clean up resources manually from Cloud Shell:
 
 ```bash
 # Delete the Cloud Run service (replace with your actual service name if different)
